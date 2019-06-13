@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -13,8 +13,6 @@
  */
 package zipkin2.storage.cassandra.v1;
 
-import com.datastax.driver.core.ResultSet;
-import com.datastax.driver.core.Session;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheBuilderSpec;
 import com.google.common.collect.ImmutableSet;
@@ -22,7 +20,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentMap;
 import zipkin2.Call;
-import zipkin2.v1.V1Span;
+import zipkin2.Span;
 
 final class CompositeIndexer {
 
@@ -31,20 +29,21 @@ final class CompositeIndexer {
   // Shared for all indexes to make data management easier (ex. maximumSize)
   private final ConcurrentMap<PartitionKeyToTraceId, Pair> sharedState;
 
-  CompositeIndexer(Session session, CacheBuilderSpec spec, int bucketCount, int indexTtl) {
+  CompositeIndexer(CassandraStorage storage, CacheBuilderSpec spec, int indexTtl) {
     this.sharedState = CacheBuilder.from(spec).<PartitionKeyToTraceId, Pair>build().asMap();
-    Indexer.Factory factory = new Indexer.Factory(session, indexTtl, sharedState);
-    this.indexers =
-        ImmutableSet.of(
-            factory.create(new InsertTraceIdByServiceName(bucketCount)),
-            factory.create(new InsertTraceIdBySpanName()),
-            factory.create(new InsertTraceIdByAnnotation(bucketCount)));
+    Indexer.Factory factory = new Indexer.Factory(storage.session(), indexTtl, sharedState);
+    ImmutableSet.Builder<Indexer> indexers = ImmutableSet.builder();
+    indexers.add(factory.create(new InsertTraceIdByServiceName(storage.bucketCount)));
+    if (storage.metadata().hasRemoteService) {
+      indexers.add(factory.create(new InsertTraceIdByRemoteServiceName()));
+    }
+    indexers.add(factory.create(new InsertTraceIdBySpanName()));
+    indexers.add(factory.create(new InsertTraceIdByAnnotation(storage.bucketCount)));
+    this.indexers = indexers.build();
   }
 
-  void index(List<V1Span> spans, List<Call<ResultSet>> calls) {
-    for (Indexer optimizer : indexers) {
-      optimizer.index(spans, calls);
-    }
+  void index(Span span, List<Call<Void>> calls) {
+    for (Indexer indexer : indexers) indexer.index(span, calls);
   }
 
   public void clear() {

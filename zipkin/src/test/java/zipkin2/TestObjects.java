@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -19,15 +19,17 @@ import java.util.List;
 import java.util.Random;
 import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
+import zipkin2.storage.QueryRequest;
 
 import static java.util.Arrays.asList;
 
+// re-declared in zipkin-tests to avoid having to move most tests out of this module
 public final class TestObjects {
   public static final Charset UTF_8 = Charset.forName("UTF-8");
   /** Notably, the cassandra implementation has day granularity */
   public static final long DAY = TimeUnit.MILLISECONDS.convert(1, TimeUnit.DAYS);
 
-  public static final TimeZone UTC = TimeZone.getTimeZone("UTC");
+  static final TimeZone UTC = TimeZone.getTimeZone("UTC");
 
   // Use real time, as most span-stores have TTL logic which looks back several days.
   public static final long TODAY = midnightUTC(System.currentTimeMillis());
@@ -99,7 +101,6 @@ public final class TestObjects {
   // storage query units are milliseconds, while trace data is microseconds
   public static final long TRACE_DURATION = TRACE.get(0).durationAsLong() / 1000;
   public static final long TRACE_STARTTS = TRACE.get(0).timestampAsLong() / 1000;
-  public static final long TRACE_ENDTS = TRACE_STARTTS + TRACE_DURATION;
 
   static final Span.Builder spanBuilder = spanBuilder();
 
@@ -123,5 +124,9 @@ public final class TestObjects {
 
   public static Span span(long traceId) {
     return spanBuilder.traceId(Long.toHexString(traceId)).id(traceId).build();
+  }
+
+  public static QueryRequest.Builder requestBuilder() {
+    return QueryRequest.newBuilder().endTs(TODAY + DAY).lookback(DAY * 2).limit(100);
   }
 }

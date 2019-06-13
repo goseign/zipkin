@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -16,13 +16,18 @@ package zipkin2.storage.cassandra.v1;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
 import com.google.common.cache.CacheBuilderSpec;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import zipkin2.CheckResult;
 import zipkin2.internal.Nullable;
+import zipkin2.storage.AutocompleteTags;
 import zipkin2.storage.QueryRequest;
+import zipkin2.storage.ServiceAndSpanNames;
 import zipkin2.storage.SpanConsumer;
 import zipkin2.storage.SpanStore;
 import zipkin2.storage.StorageComponent;
+import zipkin2.storage.cassandra.internal.call.DeduplicatingVoidCallFactory;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
@@ -33,11 +38,11 @@ import static com.google.common.base.Preconditions.checkNotNull;
  * is enabled via SLF4J. Trace level includes bound values.
  *
  * <p>Redundant requests to store service or span names are ignored for an hour to reduce load. This
- * feature is implemented by {@link DeduplicatingCall}.
+ * feature is implemented by {@link DeduplicatingVoidCallFactory}.
  *
- * <p>Schema is installed by default from "/cassandra-schema-cql3.txt"
+ * <p>Schema is installed by default from "/cassandra-schema.cql"
  */
-public final class CassandraStorage extends StorageComponent {
+public class CassandraStorage extends StorageComponent { // not final for mocking
 
   public static Builder newBuilder() {
     return new Builder();
@@ -57,6 +62,9 @@ public final class CassandraStorage extends StorageComponent {
     int indexCacheMax = 100000;
     int indexCacheTtl = 60;
     int indexFetchMultiplier = 3;
+    List<String> autocompleteKeys = new ArrayList<>();
+    int autocompleteTtl = (int) TimeUnit.HOURS.toMillis(1);
+    int autocompleteCardinality = 5 * 4000; // Ex. 5 site tags with cardinality 4000 each
 
     /**
      * Used to avoid hot spots when writing indexes used to query by service name or annotation.
@@ -83,6 +91,24 @@ public final class CassandraStorage extends StorageComponent {
     @Override
     public Builder searchEnabled(boolean searchEnabled) {
       this.searchEnabled = searchEnabled;
+      return this;
+    }
+
+    @Override public Builder autocompleteKeys(List<String> keys) {
+      if (keys == null) throw new NullPointerException("keys == null");
+      this.autocompleteKeys = keys;
+      return this;
+    }
+
+    @Override public Builder autocompleteTtl(int autocompleteTtl) {
+      if (autocompleteTtl <= 0) throw new IllegalArgumentException("autocompleteTtl <= 0");
+      this.autocompleteTtl = autocompleteTtl;
+      return this;
+    }
+
+    @Override public Builder autocompleteCardinality(int autocompleteCardinality) {
+      if (autocompleteCardinality <= 0) throw new IllegalArgumentException("autocompleteCardinality <= 0");
+      this.autocompleteCardinality = autocompleteCardinality;
       return this;
     }
 
@@ -124,7 +150,7 @@ public final class CassandraStorage extends StorageComponent {
 
     /**
      * Ensures that schema exists, if enabled tries to execute script
-     * io.zipkin:zipkin-cassandra-core/cassandra-schema-cql3.txt. Defaults to true.
+     * io.zipkin:zipkin-cassandra-core/cassandra-schema.cql. Defaults to true.
      */
     public Builder ensureSchema(boolean ensureSchema) {
       this.ensureSchema = ensureSchema;
@@ -187,7 +213,8 @@ public final class CassandraStorage extends StorageComponent {
      * Defaults to 100000.
      *
      * <p>This is used to obviate redundant inserts into {@link Tables#SERVICE_NAME_INDEX}, {@link
-     * Tables#SERVICE_SPAN_NAME_INDEX} and {@link Tables#ANNOTATIONS_INDEX}.
+     * Tables#SERVICE_REMOTE_SERVICE_NAME_INDEX}, {@link Tables#SERVICE_SPAN_NAME_INDEX} and {@link
+     * Tables#ANNOTATIONS_INDEX}.
      *
      * <p>Corresponds to the count of rows inserted into between {@link #indexCacheTtl} and now.
      * This is bounded so that collectors that get large trace volume don't run out of memory before
@@ -255,12 +282,16 @@ public final class CassandraStorage extends StorageComponent {
   final int indexFetchMultiplier;
   final boolean strictTraceId, searchEnabled;
   final LazySession session;
+  final List<String> autocompleteKeys;
+  final int autocompleteTtl;
+  final int autocompleteCardinality;
 
   /** close is typically called from a different thread */
   volatile boolean closeCalled;
 
   volatile CassandraSpanConsumer spanConsumer;
   volatile CassandraSpanStore spanStore;
+  volatile CassandraAutocompleteTags tagStore;
 
   CassandraStorage(Builder b) {
     this.contactPoints = b.contactPoints;
@@ -286,6 +317,9 @@ public final class CassandraStorage extends StorageComponent {
       this.indexCacheSpec = null;
     }
     this.indexFetchMultiplier = b.indexFetchMultiplier;
+    this.autocompleteKeys = b.autocompleteKeys;
+    this.autocompleteTtl = b.autocompleteTtl;
+    this.autocompleteCardinality = b.autocompleteCardinality;
   }
 
   /** Lazy initializes or returns the session in use by this storage component. */
@@ -293,9 +327,12 @@ public final class CassandraStorage extends StorageComponent {
     return session.get();
   }
 
+  Schema.Metadata metadata() {
+    return session.metadata();
+  }
+
   /** {@inheritDoc} Memoized in order to avoid re-preparing statements */
-  @Override
-  public SpanStore spanStore() {
+  @Override public SpanStore spanStore() {
     if (spanStore == null) {
       synchronized (this) {
         if (spanStore == null) {
@@ -304,6 +341,21 @@ public final class CassandraStorage extends StorageComponent {
       }
     }
     return spanStore;
+  }
+
+  @Override public ServiceAndSpanNames serviceAndSpanNames() {
+    return (ServiceAndSpanNames) spanStore();
+  }
+
+  @Override public AutocompleteTags autocompleteTags() {
+    if (tagStore == null) {
+      synchronized (this) {
+        if (tagStore == null) {
+          tagStore = new CassandraAutocompleteTags(this);
+        }
+      }
+    }
+    return tagStore;
   }
 
   /** {@inheritDoc} Memoized in order to avoid re-preparing statements */
@@ -322,8 +374,6 @@ public final class CassandraStorage extends StorageComponent {
   @Override
   public CheckResult check() {
     if (closeCalled) throw new IllegalStateException("closed");
-    CassandraSpanConsumer maybeConsumer = spanConsumer;
-    if (maybeConsumer != null) maybeConsumer.clear();
     try {
       session.get().execute(QueryBuilder.select("trace_id").from("traces").limit(1));
     } catch (RuntimeException e) {
@@ -336,6 +386,8 @@ public final class CassandraStorage extends StorageComponent {
   public void close() {
     if (closeCalled) return;
     session.close();
+    CassandraSpanConsumer maybeConsumer = spanConsumer;
+    if (maybeConsumer != null) maybeConsumer.clear();
     closeCalled = true;
   }
 }

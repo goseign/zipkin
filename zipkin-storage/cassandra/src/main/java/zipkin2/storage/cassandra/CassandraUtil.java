@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -30,31 +30,31 @@ import zipkin2.Call;
 import zipkin2.Span;
 import zipkin2.internal.DateUtil;
 import zipkin2.internal.Nullable;
+import zipkin2.internal.Platform;
 import zipkin2.storage.QueryRequest;
+
+import static zipkin2.internal.Platform.SHORT_STRING_LENGTH;
 
 final class CassandraUtil {
   /**
-   * Zipkin's {@link QueryRequest#annotationQuery()} are equals match. Not all tag serviceSpanKeys
-   * are lookup serviceSpanKeys. For example, {@code sql.query} isn't something that is likely to be
-   * looked up by value and indexing that could add a potentially kilobyte partition key on {@link
-   * Schema#TABLE_SPAN}
-   */
-  static final int LONGEST_VALUE_TO_INDEX = 256;
-
-  /**
-   * Time window covered by a single bucket of the {@link Schema#TABLE_TRACE_BY_SERVICE_SPAN}, in
-   * seconds. Default: 1 day
+   * Time window covered by a single bucket of the {@link Schema#TABLE_TRACE_BY_SERVICE_SPAN} and
+   * {@link Schema#TABLE_TRACE_BY_SERVICE_REMOTE_SERVICE}, in seconds. Default: 1 day
    */
   private static final long DURATION_INDEX_BUCKET_WINDOW_SECONDS =
-      Long.getLong("zipkin.store.cassandra.internal.durationIndexBucket", 24 * 60 * 60);
+    Long.getLong("zipkin.store.cassandra.internal.durationIndexBucket", 24 * 60 * 60);
 
   public static int durationIndexBucket(long ts_micro) {
-    // if the window constant has microsecond precision, the division produces negative values
+    // if the window constant has microsecond precision, the division produces negative getValues
     return (int) (ts_micro / (DURATION_INDEX_BUCKET_WINDOW_SECONDS * 1_000_000));
   }
 
   /**
-   * Returns a set of annotation values and tags joined on equals, delimited by ░
+   * Returns a set of annotation getValues and tags joined on equals, delimited by ░
+   *
+   * <p>Values over {@link Platform#SHORT_STRING_LENGTH} are not considered. Zipkin's {@link
+   * QueryRequest#annotationQuery()} are equals match. Not all values are lookup values. For
+   * example, {@code sql.query} isn't something that is likely to be looked up by value and indexing
+   * that could add a potentially kilobyte partition key on {@link Schema#TABLE_SPAN}
    *
    * @see QueryRequest#annotationQuery()
    */
@@ -64,16 +64,16 @@ final class CassandraUtil {
     char delimiter = '░'; // as very unlikely to be in the query
     StringBuilder result = new StringBuilder().append(delimiter);
     for (Annotation a : span.annotations()) {
-      if (a.value().length() > LONGEST_VALUE_TO_INDEX) continue;
+      if (a.value().length() > SHORT_STRING_LENGTH) continue;
 
       result.append(a.value()).append(delimiter);
     }
 
     for (Map.Entry<String, String> tag : span.tags().entrySet()) {
-      if (tag.getValue().length() > LONGEST_VALUE_TO_INDEX) continue;
+      if (tag.getValue().length() > SHORT_STRING_LENGTH) continue;
 
       result.append(tag.getKey()).append(delimiter); // search is possible by key alone
-      result.append(tag.getKey() + "=" + tag.getValue()).append(delimiter);
+      result.append(tag.getKey()).append('=').append(tag.getValue()).append(delimiter);
     }
     return result.length() == 1 ? null : result.toString();
   }
@@ -104,9 +104,9 @@ final class CassandraUtil {
       SortedMap<BigInteger, String> sorted = new TreeMap<>(Collections.reverseOrder());
       for (Map.Entry<String, Long> entry : map.entrySet()) {
         BigInteger uncollided =
-            BigInteger.valueOf(entry.getValue())
-                .multiply(OFFSET)
-                .add(BigInteger.valueOf(RAND.nextInt() & Integer.MAX_VALUE));
+          BigInteger.valueOf(entry.getValue())
+            .multiply(OFFSET)
+            .add(BigInteger.valueOf(RAND.nextInt() & Integer.MAX_VALUE));
         sorted.put(uncollided, entry.getKey());
       }
       return new LinkedHashSet<>(sorted.values());

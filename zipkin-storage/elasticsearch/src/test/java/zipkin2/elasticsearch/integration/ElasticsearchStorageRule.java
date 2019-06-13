@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -24,7 +24,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
-import org.testcontainers.containers.wait.HttpWaitStrategy;
+import org.testcontainers.containers.wait.strategy.HttpWaitStrategy;
 import zipkin2.CheckResult;
 import zipkin2.elasticsearch.ElasticsearchStorage;
 
@@ -43,19 +43,23 @@ public class ElasticsearchStorageRule extends ExternalResource {
 
   @Override
   protected void before() {
-    try {
-      LOGGER.info("Starting docker image " + image);
-      container =
+    if (!"true".equals(System.getProperty("docker.skip"))) {
+      try {
+        LOGGER.info("Starting docker image " + image);
+        container =
           new GenericContainer(image)
-              .withExposedPorts(ELASTICSEARCH_PORT)
-              .waitingFor(new HttpWaitStrategy().forPath("/"));
-      container.start();
-      if (Boolean.valueOf(System.getenv("ES_DEBUG"))) {
-        container.followOutput(new Slf4jLogConsumer(LoggerFactory.getLogger(image)));
+            .withExposedPorts(ELASTICSEARCH_PORT)
+            .waitingFor(new HttpWaitStrategy().forPath("/"));
+        container.start();
+        if (Boolean.valueOf(System.getenv("ES_DEBUG"))) {
+          container.followOutput(new Slf4jLogConsumer(LoggerFactory.getLogger(image)));
+        }
+        LOGGER.info("Starting docker image " + image);
+      } catch (RuntimeException e) {
+        LOGGER.warn("Couldn't start docker image " + image + ": " + e.getMessage(), e);
       }
-      System.out.println("Starting docker image " + image);
-    } catch (RuntimeException e) {
-      LOGGER.warn("Couldn't start docker image " + image + ": " + e.getMessage(), e);
+    } else {
+      LOGGER.info("Skipping startup of docker " + image);
     }
 
     try {

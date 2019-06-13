@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -30,7 +30,7 @@ abstract class ITSpanConsumer {
 
   @Before
   public void connect() {
-    storage = storageBuilder().keyspace(keyspace()).build();
+    storage = storageBuilder().autocompleteKeys(asList("environment")).keyspace(keyspace()).build();
   }
 
   abstract CassandraStorage.Builder storageBuilder();
@@ -72,21 +72,23 @@ abstract class ITSpanConsumer {
           .parentId(trace[0].id())
           .id(i + 1)
           .name(String.valueOf(i + 1))
-          .timestamp(trace[0].timestamp() + i * 1000) // child span timestamps happen 1 ms later
+          .timestamp(trace[0].timestampAsLong() + i * 1000) // child span timestamps happen 1 ms later
           .addAnnotation(trace[0].annotations().get(0).timestamp() + i * 1000, "bar")
           .build();
     }
 
     accept(storage.spanConsumer(), trace);
-    assertThat(rowCount("annotations_index")).isEqualTo(5L);
-    assertThat(rowCount("service_span_name_index")).isEqualTo(2L);
-    assertThat(rowCount("service_name_index")).isEqualTo(2L);
+    assertThat(rowCount(Tables.ANNOTATIONS_INDEX)).isEqualTo(5L);
+    assertThat(rowCount(Tables.SERVICE_REMOTE_SERVICE_NAME_INDEX)).isEqualTo(1L);
+    assertThat(rowCount(Tables.SERVICE_NAME_INDEX)).isEqualTo(1L);
+    assertThat(rowCount(Tables.SERVICE_SPAN_NAME_INDEX)).isEqualTo(1L);
 
     // redundant store doesn't change the indexes
     accept(storage.spanConsumer(), trace);
-    assertThat(rowCount("annotations_index")).isEqualTo(5L);
-    assertThat(rowCount("service_span_name_index")).isEqualTo(2L);
-    assertThat(rowCount("service_name_index")).isEqualTo(2L);
+    assertThat(rowCount(Tables.ANNOTATIONS_INDEX)).isEqualTo(5L);
+    assertThat(rowCount(Tables.SERVICE_REMOTE_SERVICE_NAME_INDEX)).isEqualTo(1L);
+    assertThat(rowCount(Tables.SERVICE_NAME_INDEX)).isEqualTo(1L);
+    assertThat(rowCount(Tables.SERVICE_SPAN_NAME_INDEX)).isEqualTo(1L);
   }
 
   void accept(SpanConsumer consumer, Span... spans) throws IOException {
@@ -100,5 +102,37 @@ abstract class ITSpanConsumer {
       .execute("SELECT COUNT(*) from " + table)
       .one()
       .getLong(0);
+  }
+
+  static String getTagValue(CassandraStorage storage, String key) {
+    return storage
+      .session()
+      .execute("SELECT value from " + Tables.AUTOCOMPLETE_TAGS + " WHERE key='" + key + "'")
+      .one()
+      .getString(0);
+  }
+
+  @Test
+  public void insertTags_SelectTags_CalculateCount() throws IOException {
+    Span[] trace = new Span[2];
+    trace[0] = TestObjects.CLIENT_SPAN;
+
+    trace[1] =
+      Span.newBuilder()
+        .traceId(trace[0].traceId())
+        .parentId(trace[0].id())
+        .id(1)
+        .name("1")
+        .putTag("environment", "dev")
+        .putTag("a", "b")
+        .timestamp(trace[0].timestampAsLong()  * 1000) // child span timestamps happen 1 ms later
+        .addAnnotation(trace[0].annotations().get(0).timestamp() + 1000, "bar")
+        .build();
+    accept(storage.spanConsumer(), trace);
+
+    assertThat(rowCount(Tables.AUTOCOMPLETE_TAGS))
+      .isGreaterThanOrEqualTo(1L);
+
+    assertThat(getTagValue(storage, "environment")).isEqualTo("dev");
   }
 }

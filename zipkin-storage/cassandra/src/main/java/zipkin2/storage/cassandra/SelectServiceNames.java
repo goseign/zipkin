@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -14,26 +14,22 @@
 package zipkin2.storage.cassandra;
 
 import com.datastax.driver.core.PreparedStatement;
+import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.ResultSetFuture;
-import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.function.BiConsumer;
-import java.util.function.Supplier;
 import zipkin2.Call;
-import zipkin2.storage.cassandra.internal.call.AccumulateAllResults;
+import zipkin2.storage.cassandra.internal.call.DistinctSortedStrings;
 import zipkin2.storage.cassandra.internal.call.ResultSetFutureCall;
 
 import static zipkin2.storage.cassandra.Schema.TABLE_SERVICE_SPANS;
 
-final class SelectServiceNames extends ResultSetFutureCall {
+final class SelectServiceNames extends ResultSetFutureCall<ResultSet> {
   static class Factory {
     final Session session;
     final PreparedStatement preparedStatement;
-    final AccumulateServicesAllResults accumulateServicesIntoSet =
-        new AccumulateServicesAllResults();
+    final DistinctSortedStrings services = new DistinctSortedStrings("service");
 
     Factory(Session session) {
       this.session = session;
@@ -42,7 +38,7 @@ final class SelectServiceNames extends ResultSetFutureCall {
     }
 
     Call<List<String>> create() {
-      return new SelectServiceNames(this).flatMap(accumulateServicesIntoSet);
+      return new SelectServiceNames(this).flatMap(services);
     }
   }
 
@@ -52,35 +48,19 @@ final class SelectServiceNames extends ResultSetFutureCall {
     this.factory = factory;
   }
 
-  @Override
-  protected ResultSetFuture newFuture() {
+  @Override protected ResultSetFuture newFuture() {
     return factory.session.executeAsync(factory.preparedStatement.bind());
   }
 
-  @Override
-  public String toString() {
+  @Override public ResultSet map(ResultSet input) {
+    return input;
+  }
+
+  @Override public String toString() {
     return "SelectServiceNames{}";
   }
 
-  @Override
-  public SelectServiceNames clone() {
+  @Override public SelectServiceNames clone() {
     return new SelectServiceNames(factory);
-  }
-
-  static class AccumulateServicesAllResults extends AccumulateAllResults<List<String>> {
-    @Override
-    protected Supplier<List<String>> supplier() {
-      return ArrayList::new; // list is ok because it is distinct results
-    }
-
-    @Override
-    protected BiConsumer<Row, List<String>> accumulator() {
-      return (row, list) -> list.add(row.getString("service"));
-    }
-
-    @Override
-    public String toString() {
-      return "AccumulateServicesAllResults{}";
-    }
   }
 }

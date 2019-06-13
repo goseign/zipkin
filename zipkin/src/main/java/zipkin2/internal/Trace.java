@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -31,56 +31,74 @@ public class Trace {
     List<Span> result = new ArrayList<>(spans);
     Collections.sort(result, CLEANUP_COMPARATOR);
 
-    // Lets pick the longest trace ID
-    String traceId = spans.get(0).traceId();
+    // Let's cleanup any spans and pick the longest ID
+    String traceId = result.get(0).traceId();
     for (int i = 1; i < length; i++) {
       String nextTraceId = result.get(i).traceId();
       if (traceId.length() != 32) traceId = nextTraceId;
     }
 
     // Now start any fixes or merging
+    Span last = null;
     for (int i = 0; i < length; i++) {
-      Span previous = result.get(i);
-      String previousId = previous.id();
-      boolean previousShared = Boolean.TRUE.equals(previous.shared());
+      Span span = result.get(i);
+      //String previousId = last.id();
+      boolean spanShared = Boolean.TRUE.equals(span.shared());
 
+      // Choose the longest trace ID
       Span.Builder replacement = null;
-      if (previous.traceId().length() != traceId.length()) {
-        replacement = previous.toBuilder().traceId(traceId);
+      if (span.traceId().length() != traceId.length()) {
+        replacement = span.toBuilder().traceId(traceId);
       }
 
       EndpointTracker localEndpoint = null;
       while (i + 1 < length) {
         Span next = result.get(i + 1);
         String nextId = next.id();
-        if (!nextId.equals(previousId)) break;
+        if (!nextId.equals(span.id())) break;
 
         if (localEndpoint == null) {
           localEndpoint = new EndpointTracker();
-          localEndpoint.tryMerge(previous.localEndpoint());
+          localEndpoint.tryMerge(span.localEndpoint());
         }
 
         // This cautiously merges with the next span, if we think it was sent in multiple pieces.
         boolean nextShared = Boolean.TRUE.equals(next.shared());
-        if (previousShared == nextShared && localEndpoint.tryMerge(next.localEndpoint())) {
-          if (replacement == null) replacement = previous.toBuilder();
+        if (spanShared == nextShared && localEndpoint.tryMerge(next.localEndpoint())) {
+          if (replacement == null) replacement = span.toBuilder();
           replacement.merge(next);
 
-          previous = next;
           // remove the merged element
           length--;
           result.remove(i + 1);
           continue;
         }
-
-        if (nextShared && next.parentId() == null && previous.parentId() != null) {
-          // handle a shared RPC server span that wasn't propagated its parent span ID
-          result.set(i + 1, next.toBuilder().parentId(previous.parentId()).build());
-        }
         break;
       }
 
-      if (replacement != null) result.set(i, replacement.build());
+      // Zipkin and B3 originally used the same span ID between client and server. Some
+      // instrumentation are inconsistent about adding the shared flag on the server side. Since we
+      // have the entire trace, and it is ordered client-first, we can correct a missing shared flag.
+      if (last != null && last.id().equals(span.id())) {
+        // Backfill missing shared flag as some instrumentation doesn't add it
+        if (last.kind() == Span.Kind.CLIENT && span.kind() == Span.Kind.SERVER && !spanShared) {
+          spanShared = true;
+          if (replacement == null) replacement = span.toBuilder();
+          replacement.shared(true);
+        }
+
+        if (spanShared && span.parentId() == null && last.parentId() != null) {
+          // handle a shared RPC server span that wasn't propagated its parent span ID
+          if (replacement == null) replacement = span.toBuilder();
+          replacement.parentId(last.parentId());
+        }
+      }
+
+      if (replacement != null) {
+        span = replacement.build();
+        result.set(i, span);
+      }
+      last = span;
     }
 
     return result;
@@ -91,11 +109,29 @@ public class Trace {
       if (left.equals(right)) return 0;
       int bySpanId = left.id().compareTo(right.id());
       if (bySpanId != 0) return bySpanId;
-      int byShared = nullSafeCompareTo(left.shared(), right.shared(), true);
+      int byShared = compareShared(left, right);
       if (byShared != 0) return byShared;
       return compareEndpoint(left.localEndpoint(), right.localEndpoint());
     }
   };
+
+  // false or null first (client first)
+  static int compareShared(Span left, Span right) {
+    // If either are shared put it last
+    boolean leftShared = Boolean.TRUE.equals(left.shared());
+    boolean rightShared = Boolean.TRUE.equals(right.shared());
+    if (leftShared && rightShared) return 0; // both are shared, so skip out
+    if (leftShared) return 1;
+    if (rightShared) return -1;
+
+    // neither are shared, put the client spans first
+    boolean leftClient = Span.Kind.CLIENT.equals(left.kind());
+    boolean rightClient = Span.Kind.CLIENT.equals(right.kind());
+    if (leftClient && rightClient) return 0;
+    if (leftClient) return -1;
+    if (rightClient) return 1;
+    return 0; // neither are client spans
+  }
 
   /**
    * Put spans with null endpoints first, so that their data can be attached to the first span with

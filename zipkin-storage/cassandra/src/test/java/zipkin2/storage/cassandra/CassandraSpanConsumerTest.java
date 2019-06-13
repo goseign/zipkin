@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -13,7 +13,6 @@
  */
 package zipkin2.storage.cassandra;
 
-import com.datastax.driver.core.ResultSet;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -23,7 +22,8 @@ import org.junit.Test;
 import org.mockito.Mockito;
 import zipkin2.Call;
 import zipkin2.Span;
-import zipkin2.storage.cassandra.CassandraSpanConsumer.StoreSpansCall;
+import zipkin2.storage.cassandra.internal.call.DeduplicatingVoidCallFactory;
+import zipkin2.storage.cassandra.internal.call.ResultSetFutureCall;
 
 import static java.util.Collections.singletonList;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -42,7 +42,7 @@ public class CassandraSpanConsumerTest {
       .id("1")
       .name("get")
       .localEndpoint(FRONTEND)
-      .timestamp(1472470996199000L)
+      .timestamp(TODAY * 1000L)
       .duration(207000L)
       .build();
 
@@ -59,7 +59,7 @@ public class CassandraSpanConsumerTest {
         .toBuilder()
         .traceId("77fcac3d4c5be8d2a037812820c65f28")
         .build();
-    StoreSpansCall call = (StoreSpansCall) consumer.accept(singletonList(span));
+    Call<Void> call = consumer.accept(singletonList(span));
 
     assertEnclosedCalls(call)
       .filteredOn(c -> c instanceof InsertSpan)
@@ -70,7 +70,7 @@ public class CassandraSpanConsumerTest {
   @Test
   public void doesntSetTraceIdHigh_64() {
     Span span = spanWithoutAnnotationsOrTags;
-    StoreSpansCall call = (StoreSpansCall) consumer.accept(singletonList(span));
+    Call<Void> call = consumer.accept(singletonList(span));
 
     assertEnclosedCalls(call)
       .filteredOn(c -> c instanceof InsertSpan)
@@ -87,7 +87,7 @@ public class CassandraSpanConsumerTest {
         .toBuilder()
         .traceId("77fcac3d4c5be8d2a037812820c65f28")
         .build();
-    StoreSpansCall call = (StoreSpansCall) consumer.accept(singletonList(span));
+    Call<Void> call = consumer.accept(singletonList(span));
 
     assertEnclosedCalls(call)
       .filteredOn(c -> c instanceof InsertSpan)
@@ -99,37 +99,38 @@ public class CassandraSpanConsumerTest {
   public void serviceSpanKeys() {
     Span span = spanWithoutAnnotationsOrTags;
 
-    StoreSpansCall call = (StoreSpansCall) consumer.accept(singletonList(span));
+    Call<Void> call = consumer.accept(singletonList(span));
 
     assertEnclosedCalls(call)
-      .filteredOn(c -> c instanceof InsertServiceSpan)
+      .filteredOn(c -> c instanceof DeduplicatingVoidCallFactory.InvalidatingVoidCall)
       .extracting("input.service", "input.span")
       .containsExactly(tuple(FRONTEND.serviceName(), span.name()));
   }
 
   @Test
-  public void serviceSpanKeys_addsRemoteServiceName() {
+  public void serviceRemoteServiceKeys_addsRemoteServiceName() {
     Span span = spanWithoutAnnotationsOrTags.toBuilder().remoteEndpoint(BACKEND).build();
 
-    StoreSpansCall call = (StoreSpansCall) consumer.accept(singletonList(span));
+    Call<Void> call = consumer.accept(singletonList(span));
 
     assertEnclosedCalls(call)
-      .filteredOn(c -> c instanceof InsertServiceSpan)
-      .extracting("input.service", "input.span")
+      .filteredOn(c -> c instanceof DeduplicatingVoidCallFactory.InvalidatingVoidCall)
+      .extracting("input")
       .containsExactly(
-        tuple(BACKEND.serviceName(), span.name()), tuple(FRONTEND.serviceName(), span.name()));
+        InsertServiceSpan.Input.create(FRONTEND.serviceName(), span.name()),
+        InsertServiceRemoteService.Input.create(FRONTEND.serviceName(), BACKEND.serviceName())
+      );
   }
 
   @Test
-  public void serviceSpanKeys_appendsEmptyWhenNoName() {
-    Span span = spanWithoutAnnotationsOrTags.toBuilder().name(null).build();
+  public void serviceRemoteServiceKeys_skipsRemoteServiceNameWhenNoLocalService() {
+    Span span = spanWithoutAnnotationsOrTags.toBuilder()
+      .localEndpoint(null)
+      .remoteEndpoint(BACKEND).build();
 
-    StoreSpansCall call = (StoreSpansCall) consumer.accept(singletonList(span));
+    Call<Void> call = consumer.accept(singletonList(span));
 
-    assertEnclosedCalls(call)
-      .filteredOn(c -> c instanceof InsertServiceSpan)
-      .extracting("input.service", "input.span")
-      .containsExactly(tuple(FRONTEND.serviceName(), ""));
+    assertThat(call).isInstanceOf(InsertSpan.class);
   }
 
   @Test
@@ -137,7 +138,7 @@ public class CassandraSpanConsumerTest {
     Span span = spanWithoutAnnotationsOrTags.toBuilder().localEndpoint(null).build();
 
     assertThat(consumer.accept(singletonList(span)))
-      .isNotInstanceOf(StoreSpansCall.class);
+      .isInstanceOf(ResultSetFutureCall.class);
   }
 
   /**
@@ -148,7 +149,7 @@ public class CassandraSpanConsumerTest {
   public void traceByServiceSpan_indexesLocalServiceNameAndEmptySpanName() {
     Span span = spanWithoutAnnotationsOrTags;
 
-    StoreSpansCall call = (StoreSpansCall) consumer.accept(singletonList(span));
+    Call<Void> call = consumer.accept(singletonList(span));
 
     assertEnclosedCalls(call)
       .filteredOn(c -> c instanceof InsertTraceByServiceSpan)
@@ -161,19 +162,19 @@ public class CassandraSpanConsumerTest {
   public void traceByServiceSpan_indexesDurationInMillis() {
     Span span = spanWithoutAnnotationsOrTags;
 
-    StoreSpansCall call = (StoreSpansCall) consumer.accept(singletonList(span));
+    Call<Void> call = consumer.accept(singletonList(span));
 
     assertEnclosedCalls(call)
       .filteredOn(c -> c instanceof InsertTraceByServiceSpan)
       .extracting("input.duration")
-      .containsOnly(span.duration() / 1000L);
+      .containsOnly(span.durationAsLong() / 1000L);
   }
 
   @Test
   public void traceByServiceSpan_indexesDurationMinimumZero() {
     Span span = spanWithoutAnnotationsOrTags.toBuilder().duration(12L).build();
 
-    StoreSpansCall call = (StoreSpansCall) consumer.accept(singletonList(span));
+    Call<Void> call = consumer.accept(singletonList(span));
 
     assertEnclosedCalls(call)
       .filteredOn(c -> c instanceof InsertTraceByServiceSpan)
@@ -185,7 +186,7 @@ public class CassandraSpanConsumerTest {
   public void traceByServiceSpan_skipsOnNoTimestamp() {
     Span span = spanWithoutAnnotationsOrTags.toBuilder().timestamp(null).build();
 
-    StoreSpansCall call = (StoreSpansCall) consumer.accept(singletonList(span));
+    Call<Void> call = consumer.accept(singletonList(span));
 
     assertEnclosedCalls(call)
       .filteredOn(c -> c instanceof InsertTraceByServiceSpan)
@@ -197,7 +198,7 @@ public class CassandraSpanConsumerTest {
   public void traceByServiceSpan_doesntIndexRemoteService() {
     Span span = spanWithoutAnnotationsOrTags.toBuilder().remoteEndpoint(BACKEND).build();
 
-    StoreSpansCall call = (StoreSpansCall) consumer.accept(singletonList(span));
+    Call<Void> call = consumer.accept(singletonList(span));
 
     assertEnclosedCalls(call)
       .filteredOn(c -> c instanceof InsertTraceByServiceSpan)
@@ -210,7 +211,7 @@ public class CassandraSpanConsumerTest {
   public void traceByServiceSpan_appendsEmptyWhenNoName() {
     Span span = spanWithoutAnnotationsOrTags.toBuilder().name(null).build();
 
-    StoreSpansCall call = (StoreSpansCall) consumer.accept(singletonList(span));
+    Call<Void> call = consumer.accept(singletonList(span));
 
     assertEnclosedCalls(call)
       .filteredOn(c -> c instanceof InsertTraceByServiceSpan)
@@ -223,7 +224,7 @@ public class CassandraSpanConsumerTest {
     Span span = spanWithoutAnnotationsOrTags.toBuilder().localEndpoint(null).build();
 
     assertThat(consumer.accept(singletonList(span)))
-      .isNotInstanceOf(StoreSpansCall.class);
+      .isInstanceOf(ResultSetFutureCall.class);
   }
 
   @Test
@@ -233,22 +234,28 @@ public class CassandraSpanConsumerTest {
     Span span =
       spanWithoutAnnotationsOrTags
         .toBuilder()
-        .addAnnotation(TODAY, "annotation")
+        .addAnnotation(TODAY * 1000L, "annotation")
         .putTag("foo", "bar")
         .duration(10000L)
         .build();
 
     assertThat(consumer.accept(singletonList(span)))
-      .extracting("delegate.input.annotation_query")
+      .extracting("input.annotation_query")
       .allSatisfy(q -> assertThat(q).isNull());
   }
 
-  static AbstractListAssert<
-    ?, List<? extends Call<ResultSet>>, Call<ResultSet>, ObjectAssert<Call<ResultSet>>>
-  assertEnclosedCalls(StoreSpansCall call) {
+  @Test public void doesntIndexWhenOnlyIncludesTimestamp() {
+    Span span = Span.newBuilder().traceId("a").id("1").timestamp(TODAY * 1000L).build();
+
+    assertThat(consumer.accept(singletonList(span)))
+      .isInstanceOf(ResultSetFutureCall.class);
+  }
+
+  static AbstractListAssert<?, List<? extends Call<Void>>, Call<Void>, ObjectAssert<Call<Void>>>
+  assertEnclosedCalls(Call<Void> call) {
     return assertThat(call)
       .extracting("calls")
-      .flatExtracting(calls -> (Collection<Call<ResultSet>>) calls);
+      .flatExtracting(calls -> (Collection<Call<Void>>) calls);
   }
 
   static CassandraSpanConsumer spanConsumer(CassandraStorage.Builder builder) {

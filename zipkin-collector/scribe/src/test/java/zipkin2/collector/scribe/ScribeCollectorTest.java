@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -13,7 +13,6 @@
  */
 package zipkin2.collector.scribe;
 
-import org.jboss.netty.channel.ChannelException;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
@@ -26,10 +25,9 @@ public class ScribeCollectorTest {
   InMemoryStorage storage = InMemoryStorage.newBuilder().build();
   @Rule public ExpectedException thrown = ExpectedException.none();
 
-  @Test
-  public void check_failsWhenNotStarted() {
+  @Test public void check_failsWhenNotStarted() {
     try (ScribeCollector scribe =
-        ScribeCollector.newBuilder().storage(storage).port(12345).build()) {
+           ScribeCollector.newBuilder().storage(storage).port(12345).build()) {
 
       CheckResult result = scribe.check();
       assertThat(result.ok()).isFalse();
@@ -40,15 +38,15 @@ public class ScribeCollectorTest {
     }
   }
 
-  @Test
-  public void start_failsWhenCantBindPort() {
-    thrown.expect(ChannelException.class);
-    thrown.expectMessage("Failed to bind to: 0.0.0.0/0.0.0.0:12345");
+  @Test public void start_failsWhenCantBindPort() {
+    thrown.expect(RuntimeException.class);
+    thrown.expectMessage("Could not start scribe server.");
 
     ScribeCollector.Builder builder = ScribeCollector.newBuilder().storage(storage).port(12345);
 
     try (ScribeCollector first = builder.build().start()) {
-      try (ScribeCollector samePort = builder.build().start()) {}
+      try (ScribeCollector samePort = builder.build().start()) {
+      }
     }
   }
 }

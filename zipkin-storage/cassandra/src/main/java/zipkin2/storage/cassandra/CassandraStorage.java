@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -19,9 +19,14 @@ import com.datastax.driver.core.Session;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
 import com.google.auto.value.AutoValue;
 import com.google.auto.value.extension.memoized.Memoized;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
 import zipkin2.CheckResult;
 import zipkin2.internal.Nullable;
+import zipkin2.storage.AutocompleteTags;
 import zipkin2.storage.QueryRequest;
+import zipkin2.storage.ServiceAndSpanNames;
 import zipkin2.storage.SpanConsumer;
 import zipkin2.storage.SpanStore;
 import zipkin2.storage.StorageComponent;
@@ -49,7 +54,7 @@ public abstract class CassandraStorage extends StorageComponent {
   }
 
   public static Builder newBuilder() {
-    return new AutoValue_CassandraStorage.Builder()
+    return new $AutoValue_CassandraStorage.Builder()
         .strictTraceId(true)
         .searchEnabled(true)
         .keyspace(Schema.DEFAULT_KEYSPACE)
@@ -60,7 +65,10 @@ public abstract class CassandraStorage extends StorageComponent {
         .useSsl(false)
         .maxTraceCols(100000)
         .indexFetchMultiplier(3)
-        .sessionFactory(SessionFactory.DEFAULT);
+        .sessionFactory(SessionFactory.DEFAULT)
+        .autocompleteKeys(Collections.emptyList())
+        .autocompleteTtl((int) TimeUnit.HOURS.toMillis(1))
+        .autocompleteCardinality(5 * 4000); // Ex. 5 site tags with cardinality 4000 each
   }
 
   @AutoValue.Builder
@@ -72,6 +80,18 @@ public abstract class CassandraStorage extends StorageComponent {
     /** {@inheritDoc} */
     @Override
     public abstract Builder searchEnabled(boolean searchEnabled);
+
+    /** {@inheritDoc} */
+    @Override
+    public abstract Builder autocompleteKeys(List<String> autocompleteKeys);
+
+    /** {@inheritDoc} */
+    @Override
+    public abstract Builder autocompleteTtl(int autocompleteTtl);
+
+    /** {@inheritDoc} */
+    @Override
+    public abstract Builder autocompleteCardinality(int autocompleteCardinality);
 
     /** Override to control how sessions are created. */
     public abstract Builder sessionFactory(SessionFactory sessionFactory);
@@ -126,8 +146,8 @@ public abstract class CassandraStorage extends StorageComponent {
     /**
      * How many more index rows to fetch than the user-supplied query limit. Defaults to 3.
      *
-     * <p>Backend requests will request {@link QueryRequest#limit} times this factor rows from
-     * Cassandra indexes in attempts to return {@link QueryRequest#limit} traces.
+     * <p>Backend requests will request {@link QueryRequest#limit()} times this factor rows from
+     * Cassandra indexes in attempts to return {@link QueryRequest#limit()} traces.
      *
      * <p>Indexing in cassandra will usually have more rows than trace identifiers due to factors
      * including table design and collection implementation. As there's no way to DISTINCT out
@@ -168,6 +188,12 @@ public abstract class CassandraStorage extends StorageComponent {
 
   abstract boolean searchEnabled();
 
+  abstract List<String> autocompleteKeys();
+
+  abstract int autocompleteTtl();
+
+  abstract int autocompleteCardinality();
+
   abstract SessionFactory sessionFactory();
 
   /** session and close are typically called from different threads */
@@ -188,11 +214,26 @@ public abstract class CassandraStorage extends StorageComponent {
     return new CassandraSpanStore(this);
   }
 
+  @Override public ServiceAndSpanNames serviceAndSpanNames() {
+    return (CassandraSpanStore) spanStore();
+  }
+
+  /** {@inheritDoc} Memoized in order to avoid re-preparing statements */
+  @Memoized
+  @Override
+  public AutocompleteTags autocompleteTags() {
+    return new CassandraAutocompleteTags(this);
+  }
+
   /** {@inheritDoc} Memoized in order to avoid re-preparing statements */
   @Memoized
   @Override
   public SpanConsumer spanConsumer() {
     return new CassandraSpanConsumer(this);
+  }
+
+  @Memoized Schema.Metadata metadata() { // warn only once when schema problems exist
+    return Schema.readMetadata(session());
   }
 
   @Override

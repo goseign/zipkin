@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -17,72 +17,49 @@ import com.datastax.driver.core.PreparedStatement;
 import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.ResultSetFuture;
 import com.datastax.driver.core.Session;
+import com.datastax.driver.core.querybuilder.Insert;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
 import com.google.auto.value.AutoValue;
-import com.google.common.base.Ticker;
-import com.google.common.cache.CacheBuilder;
-import java.io.IOException;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.TimeUnit;
-import zipkin2.Call;
-import zipkin2.Callback;
+import zipkin2.storage.cassandra.internal.call.DeduplicatingVoidCallFactory;
 import zipkin2.storage.cassandra.internal.call.ResultSetFutureCall;
 
 import static zipkin2.storage.cassandra.Schema.TABLE_SERVICE_SPANS;
 
-final class InsertServiceSpan extends ResultSetFutureCall {
+final class InsertServiceSpan extends ResultSetFutureCall<Void> {
 
   @AutoValue
   abstract static class Input {
+    static Input create(String service, String span) {
+      return new AutoValue_InsertServiceSpan_Input(service, span);
+    }
+
     abstract String service();
 
     abstract String span();
 
-    Input() {}
+    Input() {
+    }
   }
 
-  static class Factory {
+  static class Factory extends DeduplicatingVoidCallFactory<Input> {
     final Session session;
     final PreparedStatement preparedStatement;
-    final ConcurrentMap<Input, InsertServiceSpan> cache;
 
-    Factory(Session session, long ttl) {
-      this.session = session;
-      this.preparedStatement =
-          session.prepare(
-              QueryBuilder.insertInto(TABLE_SERVICE_SPANS)
-                  .value("service", QueryBuilder.bindMarker("service"))
-                  .value("span", QueryBuilder.bindMarker("span")));
-      this.cache =
-          CacheBuilder.newBuilder()
-              .expireAfterWrite(ttl, TimeUnit.MILLISECONDS)
-              .ticker(
-                  new Ticker() {
-                    @Override
-                    public long read() {
-                      return nanoTime();
-                    }
-                  })
-              // TODO: maximum size or weight
-              .<Input, InsertServiceSpan>build()
-              .asMap();
-    }
-
-    // visible for testing, since nanoTime is weird and can return negative
-    long nanoTime() {
-      return System.nanoTime();
+    Factory(CassandraStorage storage) {
+      super(storage.autocompleteTtl(), storage.autocompleteCardinality());
+      session = storage.session();
+      Insert insertQuery = QueryBuilder.insertInto(TABLE_SERVICE_SPANS)
+        .value("service", QueryBuilder.bindMarker("service"))
+        .value("span", QueryBuilder.bindMarker("span"));
+      preparedStatement = session.prepare(insertQuery);
     }
 
     Input newInput(String service, String span) {
-      return new AutoValue_InsertServiceSpan_Input(service, span);
+      return Input.create(service, span);
     }
 
-    Call<ResultSet> create(Input input) {
-      if (input == null) throw new NullPointerException("input == null");
-      if (cache.containsKey(input)) return Call.create(null);
-      InsertServiceSpan realCall = new InsertServiceSpan(this, input);
-      if (cache.putIfAbsent(input, realCall) != null) return Call.create(null);
-      return realCall;
+    @Override protected InsertServiceSpan newCall(Input input) {
+      return new InsertServiceSpan(this, input);
     }
   }
 
@@ -94,56 +71,21 @@ final class InsertServiceSpan extends ResultSetFutureCall {
     this.input = input;
   }
 
-  @Override
-  protected ResultSetFuture newFuture() {
-    return factory.session.executeAsync(
-        factory
-            .preparedStatement
-            .bind()
-            .setString("service", input.service())
-            .setString("span", input.span()));
+  @Override protected ResultSetFuture newFuture() {
+    return factory.session.executeAsync(factory.preparedStatement.bind()
+      .setString("service", input.service())
+      .setString("span", input.span()));
   }
 
-  @Override
-  protected ResultSet doExecute() throws IOException {
-    try {
-      return super.doExecute();
-    } catch (IOException | RuntimeException | Error e) {
-      factory.cache.remove(input, InsertServiceSpan.this); // invalidate
-      throw e;
-    }
+  @Override public Void map(ResultSet input) {
+    return null;
   }
 
-  @Override
-  protected void doEnqueue(Callback<ResultSet> callback) {
-    super.doEnqueue(
-        new Callback<ResultSet>() {
-          @Override
-          public void onSuccess(ResultSet value) {
-            callback.onSuccess(value);
-          }
-
-          @Override
-          public void onError(Throwable t) {
-            factory.cache.remove(input, InsertServiceSpan.this); // invalidate
-            callback.onError(t);
-          }
-        });
-  }
-
-  @Override
-  protected void doCancel() {
-    factory.cache.remove(input, InsertServiceSpan.this); // invalidate
-    super.doCancel();
-  }
-
-  @Override
-  public String toString() {
+  @Override public String toString() {
     return input.toString().replace("Input", "InsertServiceSpan");
   }
 
-  @Override
-  public InsertServiceSpan clone() {
+  @Override public InsertServiceSpan clone() {
     return new InsertServiceSpan(factory, input);
   }
 }

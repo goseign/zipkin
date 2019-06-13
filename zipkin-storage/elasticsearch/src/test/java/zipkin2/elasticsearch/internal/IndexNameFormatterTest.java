@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -36,7 +36,7 @@ public class IndexNameFormatterTest {
     long end = iso8601.parse("2016-11-01T23:59:59Z").getTime();
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
-        .containsExactly("zipkin:span-2016-11-01");
+        .containsExactly("zipkin*span-2016-11-01");
   }
 
   @Test
@@ -45,7 +45,7 @@ public class IndexNameFormatterTest {
     long end = iso8601.parse("2016-11-16T23:59:59Z").getTime();
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
-        .containsExactly("zipkin:span-2016-11-15", "zipkin:span-2016-11-16");
+        .containsExactly("zipkin*span-2016-11-15", "zipkin*span-2016-11-16");
   }
 
   @Test
@@ -55,7 +55,7 @@ public class IndexNameFormatterTest {
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
         .containsExactly(
-            "zipkin:span-2016-11-01", "zipkin:span-2016-11-02", "zipkin:span-2016-11-03");
+            "zipkin*span-2016-11-01", "zipkin*span-2016-11-02", "zipkin*span-2016-11-03");
   }
 
   @Test
@@ -64,7 +64,7 @@ public class IndexNameFormatterTest {
     long end = iso8601.parse("2016-11-01T23:59:59Z").getTime();
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
-        .containsExactly("zipkin:span-2016-10-31", "zipkin:span-2016-11-01");
+        .containsExactly("zipkin*span-2016-10-31", "zipkin*span-2016-11-01");
   }
 
   @Test
@@ -73,7 +73,7 @@ public class IndexNameFormatterTest {
     long end = iso8601.parse("2016-10-31T23:59:59Z").getTime();
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
-        .containsExactly("zipkin:span-2016-10-*");
+        .containsExactly("zipkin*span-2016-10-*");
   }
 
   @Test
@@ -83,7 +83,7 @@ public class IndexNameFormatterTest {
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
         .containsExactly(
-            "zipkin:span-2016-10-31", "zipkin:span-2016-11-*", "zipkin:span-2016-12-01");
+            "zipkin*span-2016-10-31", "zipkin*span-2016-11-*", "zipkin*span-2016-12-01");
   }
 
   @Test
@@ -93,10 +93,10 @@ public class IndexNameFormatterTest {
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
         .containsExactly(
-            "zipkin:span-2016-02-28",
-            "zipkin:span-2016-02-29",
-            "zipkin:span-2016-03-*",
-            "zipkin:span-2016-04-01");
+            "zipkin*span-2016-02-28",
+            "zipkin*span-2016-02-29",
+            "zipkin*span-2016-03-*",
+            "zipkin*span-2016-04-01");
   }
 
   @Test
@@ -105,7 +105,7 @@ public class IndexNameFormatterTest {
     long end = iso8601.parse("2016-12-31T23:59:59Z").getTime();
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
-        .containsExactly("zipkin:span-2016-*");
+        .containsExactly("zipkin*span-2016-*");
   }
 
   @Test
@@ -115,11 +115,11 @@ public class IndexNameFormatterTest {
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
         .containsExactly(
-            "zipkin:span-2016-10-31",
-            "zipkin:span-2016-11-*",
-            "zipkin:span-2016-12-*",
-            "zipkin:span-2017-*",
-            "zipkin:span-2018-01-01");
+            "zipkin*span-2016-10-31",
+            "zipkin*span-2016-11-*",
+            "zipkin*span-2016-12-*",
+            "zipkin*span-2017-*",
+            "zipkin*span-2018-01-01");
   }
 
   @Test
@@ -129,7 +129,7 @@ public class IndexNameFormatterTest {
     long end = iso8601.parse("2016-11-01T23:59:59Z").getTime();
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
-        .containsExactly("zipkin:span-2016.11.01");
+        .containsExactly("zipkin*span-2016.11.01");
   }
 
   @Test
@@ -139,7 +139,7 @@ public class IndexNameFormatterTest {
     long end = iso8601.parse("2016-11-16T23:59:59Z").getTime();
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
-        .containsExactly("zipkin:span-2016.11.15", "zipkin:span-2016.11.16");
+        .containsExactly("zipkin*span-2016.11.15", "zipkin*span-2016.11.16");
   }
 
   @Test
@@ -150,7 +150,7 @@ public class IndexNameFormatterTest {
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
         .containsExactly(
-            "zipkin:span-2016.11.01", "zipkin:span-2016.11.02", "zipkin:span-2016.11.03");
+            "zipkin*span-2016.11.01", "zipkin*span-2016.11.02", "zipkin*span-2016.11.03");
   }
 
   @Test
@@ -160,7 +160,7 @@ public class IndexNameFormatterTest {
     long end = iso8601.parse("2016-11-01T23:59:59Z").getTime();
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
-        .containsExactly("zipkin:span-2016.10.31", "zipkin:span-2016.11.01");
+        .containsExactly("zipkin*span-2016.10.31", "zipkin*span-2016.11.01");
   }
 
   @Test
@@ -170,7 +170,7 @@ public class IndexNameFormatterTest {
     long end = iso8601.parse("2016-10-31T23:59:59Z").getTime();
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
-        .containsExactly("zipkin:span-2016.10.*");
+        .containsExactly("zipkin*span-2016.10.*");
   }
 
   @Test
@@ -181,7 +181,7 @@ public class IndexNameFormatterTest {
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
         .containsExactly(
-            "zipkin:span-2016.10.31", "zipkin:span-2016.11.*", "zipkin:span-2016.12.01");
+            "zipkin*span-2016.10.31", "zipkin*span-2016.11.*", "zipkin*span-2016.12.01");
   }
 
   @Test
@@ -192,10 +192,10 @@ public class IndexNameFormatterTest {
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
         .containsExactly(
-            "zipkin:span-2016.02.28",
-            "zipkin:span-2016.02.29",
-            "zipkin:span-2016.03.*",
-            "zipkin:span-2016.04.01");
+            "zipkin*span-2016.02.28",
+            "zipkin*span-2016.02.29",
+            "zipkin*span-2016.03.*",
+            "zipkin*span-2016.04.01");
   }
 
   @Test
@@ -205,7 +205,7 @@ public class IndexNameFormatterTest {
     long end = iso8601.parse("2016-12-31T23:59:59Z").getTime();
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
-        .containsExactly("zipkin:span-2016.*");
+        .containsExactly("zipkin*span-2016.*");
   }
 
   @Test
@@ -216,11 +216,11 @@ public class IndexNameFormatterTest {
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
         .containsExactly(
-            "zipkin:span-2016.10.31",
-            "zipkin:span-2016.11.*",
-            "zipkin:span-2016.12.*",
-            "zipkin:span-2017.*",
-            "zipkin:span-2018.01.01");
+            "zipkin*span-2016.10.31",
+            "zipkin*span-2016.11.*",
+            "zipkin*span-2016.12.*",
+            "zipkin*span-2017.*",
+            "zipkin*span-2018.01.01");
   }
 
   @Test
@@ -231,10 +231,10 @@ public class IndexNameFormatterTest {
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
       .containsExactly(
-        "zipkin:span-2016.10.0*",
-        "zipkin:span-2016.10.1*",
-        "zipkin:span-2016.10.2*",
-        "zipkin:span-2016.10.30");
+        "zipkin*span-2016.10.0*",
+        "zipkin*span-2016.10.1*",
+        "zipkin*span-2016.10.2*",
+        "zipkin*span-2016.10.30");
   }
 
   @Test
@@ -245,10 +245,10 @@ public class IndexNameFormatterTest {
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
       .containsExactly(
-        "zipkin:span-2016.10.09",
-        "zipkin:span-2016.10.1*",
-        "zipkin:span-2016.10.2*",
-        "zipkin:span-2016.10.30");
+        "zipkin*span-2016.10.09",
+        "zipkin*span-2016.10.1*",
+        "zipkin*span-2016.10.2*",
+        "zipkin*span-2016.10.30");
   }
 
   @Test
@@ -259,9 +259,9 @@ public class IndexNameFormatterTest {
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
       .containsExactly(
-        "zipkin:span-2016.10.19",
-        "zipkin:span-2016.10.2*",
-        "zipkin:span-2016.10.30");
+        "zipkin*span-2016.10.19",
+        "zipkin*span-2016.10.2*",
+        "zipkin*span-2016.10.30");
   }
 
   @Test
@@ -271,6 +271,6 @@ public class IndexNameFormatterTest {
     long end = iso8601.parse("2016-06-30T01:01:01Z").getTime();
 
     assertThat(formatter.formatTypeAndRange("span", start, end))
-      .containsExactly("zipkin:span-2016.06.*");
+      .containsExactly("zipkin*span-2016.06.*");
   }
 }

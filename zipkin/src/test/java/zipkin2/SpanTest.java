@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -310,6 +310,24 @@ public class SpanTest {
     );
   }
 
+  @Test public void builder_merge_localEndpoint_null() {
+    Span merged = Span.newBuilder().localEndpoint(FRONTEND)
+      .merge(Span.newBuilder().traceId(base.traceId()).id(base.id()).build()).build();
+
+    assertThat(merged).isEqualToComparingFieldByField(
+      Span.newBuilder().traceId(base.traceId()).id(base.id()).localEndpoint(FRONTEND).build()
+    );
+  }
+
+  @Test public void builder_merge_remoteEndpoint_null() {
+    Span merged = Span.newBuilder().remoteEndpoint(FRONTEND)
+      .merge(Span.newBuilder().traceId(base.traceId()).id(base.id()).build()).build();
+
+    assertThat(merged).isEqualToComparingFieldByField(
+      Span.newBuilder().traceId(base.traceId()).id(base.id()).remoteEndpoint(FRONTEND).build()
+    );
+  }
+
   @Test public void builder_merge_remoteEndpoint() {
     Span merged = Span.newBuilder()
       .merge(base.toBuilder().remoteEndpoint(FRONTEND).build()).build();
@@ -420,6 +438,11 @@ public class SpanTest {
   /** Prevents processing tools from looping */
   @Test public void parentId_sameAsIdCoerseToNull() {
     assertThat(base.toBuilder().parentId(base.id).build().parentId())
+      .isNull();
+  }
+
+  @Test public void removesSharedFlagFromClientSpans() {
+    assertThat(base.toBuilder().kind(Span.Kind.CLIENT).build().shared())
       .isNull();
   }
 

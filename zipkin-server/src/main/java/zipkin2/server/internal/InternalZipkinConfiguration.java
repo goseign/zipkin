@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -16,14 +16,33 @@ package zipkin2.server.internal;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import zipkin2.server.internal.brave.TracingConfiguration;
+import zipkin2.server.internal.cassandra.ZipkinCassandraStorageConfiguration;
+import zipkin2.server.internal.cassandra3.ZipkinCassandra3StorageConfiguration;
+import zipkin2.server.internal.elasticsearch.ZipkinElasticsearchStorageAutoConfiguration;
+import zipkin2.server.internal.kafka.ZipkinKafkaCollectorConfiguration;
+import zipkin2.server.internal.mysql.ZipkinMySQLStorageConfiguration;
+import zipkin2.server.internal.prometheus.ZipkinPrometheusMetricsConfiguration;
+import zipkin2.server.internal.rabbitmq.ZipkinRabbitMQCollectorConfiguration;
+import zipkin2.server.internal.scribe.ZipkinScribeCollectorConfiguration;
+import zipkin2.server.internal.ui.ZipkinUiConfiguration;
 
 @Configuration
 @Import({
   ZipkinServerConfiguration.class,
+  ZipkinUiConfiguration.class,
+  ZipkinCassandraStorageConfiguration.class,
+  ZipkinCassandra3StorageConfiguration.class,
+  ZipkinElasticsearchStorageAutoConfiguration.class,
+  ZipkinMySQLStorageConfiguration.class,
+  ZipkinScribeCollectorConfiguration.class,
   TracingConfiguration.class,
   ZipkinQueryApiV2.class,
   ZipkinHttpCollector.class,
-  MetricsHealthController.class
+  ZipkinGrpcCollector.class,
+  ZipkinKafkaCollectorConfiguration.class,
+  ZipkinRabbitMQCollectorConfiguration.class,
+  MetricsHealthController.class,
+  ZipkinPrometheusMetricsConfiguration.class
 })
 public class InternalZipkinConfiguration {
 }

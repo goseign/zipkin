@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -19,7 +19,10 @@ import java.util.ArrayList;
 import java.util.List;
 import org.jooq.DSLContext;
 import org.jooq.Query;
+import org.junit.Before;
 import org.junit.ClassRule;
+import org.junit.Ignore;
+import org.junit.Test;
 import org.junit.experimental.runners.Enclosed;
 import org.junit.runner.RunWith;
 import zipkin2.DependencyLink;
@@ -31,7 +34,7 @@ import static zipkin2.storage.mysql.v1.internal.generated.tables.ZipkinDependenc
 public class ITMySQLStorage {
 
   static LazyMySQLStorage classRule() {
-    return new LazyMySQLStorage("2.11.6");
+    return new LazyMySQLStorage("openzipkin/zipkin-mysql:2.13.0");
   }
 
   public static class ITSpanStore extends zipkin2.storage.ITSpanStore {
@@ -41,8 +44,10 @@ public class ITMySQLStorage {
       return storage.get();
     }
 
-    @Override
-    public void clear() {
+    @Override @Test @Ignore("No consumer-side span deduplication") public void deduplicates() {
+    }
+
+    @Override public void clear() {
       storage.get().clear();
     }
   }
@@ -50,7 +55,7 @@ public class ITMySQLStorage {
   public static class ITStrictTraceIdFalse extends zipkin2.storage.ITStrictTraceIdFalse {
     @ClassRule public static LazyMySQLStorage storageRule = classRule();
 
-    private MySQLStorage storage;
+    MySQLStorage storage;
 
     @Override protected StorageComponent storage() {
       return storage;
@@ -58,6 +63,21 @@ public class ITMySQLStorage {
 
     @Override public void clear() {
       storage = storageRule.computeStorageBuilder().strictTraceId(false).build();
+      storage.clear();
+    }
+  }
+
+  public static class ITSearchEnabledFalse extends zipkin2.storage.ITSearchEnabledFalse {
+    @ClassRule public static LazyMySQLStorage storageRule = classRule();
+
+    MySQLStorage storage;
+
+    @Override protected StorageComponent storage() {
+      return storage;
+    }
+
+    @Override public void clear() {
+      storage = storageRule.computeStorageBuilder().searchEnabled(false).build();
       storage.clear();
     }
   }
@@ -96,6 +116,30 @@ public class ITMySQLStorage {
     }
 
     @Override public void clear() {
+      storage.get().clear();
+    }
+  }
+
+  public static class ITServiceAndSpanNames extends zipkin2.storage.ITServiceAndSpanNames {
+    @ClassRule public static LazyMySQLStorage storage = classRule();
+
+    @Override protected StorageComponent storage() {
+      return storage.get();
+    }
+
+    @Override public void clear() {
+      storage.get().clear();
+    }
+  }
+
+  public static class ITAutocompleteTags extends zipkin2.storage.ITAutocompleteTags {
+    @ClassRule public static LazyMySQLStorage storage = classRule();
+
+    @Override protected StorageComponent.Builder storageBuilder() {
+      return storage.computeStorageBuilder();
+    }
+
+    @Before @Override public void clear() {
       storage.get().clear();
     }
   }

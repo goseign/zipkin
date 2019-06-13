@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -21,11 +21,11 @@ import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
-import okhttp3.RequestBody;
 import okio.Buffer;
 import okio.BufferedSource;
 import zipkin2.CheckResult;
@@ -33,12 +33,16 @@ import zipkin2.elasticsearch.internal.IndexNameFormatter;
 import zipkin2.elasticsearch.internal.client.HttpCall;
 import zipkin2.internal.Nullable;
 import zipkin2.internal.Platform;
+import zipkin2.storage.AutocompleteTags;
+import zipkin2.storage.ServiceAndSpanNames;
 import zipkin2.storage.SpanConsumer;
 import zipkin2.storage.SpanStore;
 import zipkin2.storage.StorageComponent;
 
+import static zipkin2.elasticsearch.ElasticsearchAutocompleteTags.AUTOCOMPLETE;
 import static zipkin2.elasticsearch.ElasticsearchSpanStore.DEPENDENCY;
 import static zipkin2.elasticsearch.ElasticsearchSpanStore.SPAN;
+import static zipkin2.elasticsearch.EnsureIndexTemplate.ensureIndexTemplate;
 import static zipkin2.elasticsearch.internal.JsonReaders.enterPath;
 
 @AutoValue
@@ -67,7 +71,10 @@ public abstract class ElasticsearchStorage extends zipkin2.storage.StorageCompon
         .indexReplicas(1)
         .namesLookback(86400000)
         .shutdownClientOnClose(false)
-        .flushOnWrites(false);
+        .flushOnWrites(false)
+        .autocompleteKeys(Collections.emptyList())
+        .autocompleteTtl((int) TimeUnit.HOURS.toMillis(1))
+        .autocompleteCardinality(5 * 4000); // Ex. 5 site tags with cardinality 4000 each
   }
 
   public static Builder newBuilder() {
@@ -135,7 +142,11 @@ public abstract class ElasticsearchStorage extends zipkin2.storage.StorageCompon
      */
     public abstract Builder namesLookback(int namesLookback);
 
-    /** Visible for testing */
+    /**
+     * Internal and visible only for testing.
+     *
+     * <p>See https://www.elastic.co/guide/en/elasticsearch/reference/current/docs-refresh.html
+     */
     public abstract Builder flushOnWrites(boolean flushOnWrites);
 
     /** The index prefix to use when generating daily index names. Defaults to zipkin. */
@@ -148,9 +159,9 @@ public abstract class ElasticsearchStorage extends zipkin2.storage.StorageCompon
      * The date separator to use when generating daily index names. Defaults to '-'.
      *
      * <p>By default, spans with a timestamp falling on 2016/03/19 end up in the index
-     * 'zipkin:span-2016-03-19'. When the date separator is '.', the index would be
-     * 'zipkin:span-2016.03.19'. If the date separator is 0, there is no delimiter. Ex the index
-     * would be 'zipkin:span-20160319'
+     * 'zipkin-span-2016-03-19'. When the date separator is '.', the index would be
+     * 'zipkin-span-2016.03.19'. If the date separator is 0, there is no delimiter. Ex the index
+     * would be 'zipkin-span-20160319'
      */
     public final Builder dateSeparator(char dateSeparator) {
       indexNameFormatterBuilder().dateSeparator(dateSeparator);
@@ -186,6 +197,18 @@ public abstract class ElasticsearchStorage extends zipkin2.storage.StorageCompon
     @Override
     public abstract Builder searchEnabled(boolean searchEnabled);
 
+    /** {@inheritDoc} */
+    @Override
+    public abstract Builder autocompleteKeys(List<String> autocompleteKeys);
+
+    /** {@inheritDoc} */
+    @Override
+    public abstract Builder autocompleteTtl(int autocompleteTtl);
+
+    /** {@inheritDoc} */
+    @Override
+    public abstract Builder autocompleteCardinality(int autocompleteCardinality);
+
     @Override
     public abstract ElasticsearchStorage build();
 
@@ -211,6 +234,12 @@ public abstract class ElasticsearchStorage extends zipkin2.storage.StorageCompon
 
   abstract boolean searchEnabled();
 
+  abstract List<String> autocompleteKeys();
+
+  abstract int autocompleteTtl();
+
+  abstract int autocompleteCardinality();
+
   abstract int indexShards();
 
   abstract int indexReplicas();
@@ -226,6 +255,17 @@ public abstract class ElasticsearchStorage extends zipkin2.storage.StorageCompon
   }
 
   @Override
+  public ServiceAndSpanNames serviceAndSpanNames() {
+    return (ServiceAndSpanNames) spanStore();
+  }
+
+  @Override
+  public AutocompleteTags autocompleteTags() {
+    ensureIndexTemplates();
+    return new ElasticsearchAutocompleteTags(this);
+  }
+
+  @Override
   public SpanConsumer spanConsumer() {
     ensureIndexTemplates();
     return new ElasticsearchSpanConsumer(this);
@@ -236,7 +276,11 @@ public abstract class ElasticsearchStorage extends zipkin2.storage.StorageCompon
     return ensureIndexTemplates().version();
   }
 
-  /** This is a blocking call, only used in tests. */
+  char indexTypeDelimiter() {
+    return ensureIndexTemplates().indexTypeDelimiter();
+  }
+
+  /** This is an internal blocking call, only used in tests. */
   public void clear() throws IOException {
     Set<String> toClear = new LinkedHashSet<>();
     toClear.add(indexNameFormatter().formatType(SPAN));
@@ -245,29 +289,9 @@ public abstract class ElasticsearchStorage extends zipkin2.storage.StorageCompon
   }
 
   void clear(String index) throws IOException {
-    Request deleteRequest =
-        new Request.Builder()
-            .url(http().baseUrl.newBuilder().addPathSegment(index).build())
-            .delete()
-            .tag("delete-index")
-            .build();
-
-    http().newCall(deleteRequest, BodyConverters.NULL).execute();
-
-    flush(http(), index);
-  }
-
-  /** This is a blocking call, only used in tests. */
-  public static void flush(HttpCall.Factory factory, String index) throws IOException {
-    Request flushRequest =
-        new Request.Builder()
-            .url(
-                factory.baseUrl.newBuilder().addPathSegment(index).addPathSegment("_flush").build())
-            .post(RequestBody.create(APPLICATION_JSON, ""))
-            .tag("flush-index")
-            .build();
-
-    factory.newCall(flushRequest, BodyConverters.NULL).execute();
+    HttpUrl.Builder url = http().baseUrl.newBuilder().addPathSegment(index);
+    Request delete = new Request.Builder().url(url.build()).delete().tag("delete-index").build();
+    http().newCall(delete, BodyConverters.NULL).execute();
   }
 
   /** This is blocking so that we can determine if the cluster is healthy or not */
@@ -277,14 +301,13 @@ public abstract class ElasticsearchStorage extends zipkin2.storage.StorageCompon
   }
 
   CheckResult ensureClusterReady(String index) {
-    Request request =
-        new Request.Builder()
-            .url(http().baseUrl.resolve("/_cluster/health/" + index))
-            .tag("get-cluster-health")
-            .build();
-
     try {
-      return http().newCall(request, ReadStatus.INSTANCE).execute();
+      HttpCall.Factory http = http();
+      Request request = new Request.Builder()
+        .url(http.baseUrl.resolve("/_cluster/health/" + index))
+        .tag("get-cluster-health")
+        .build();
+      return http.newCall(request, ReadStatus.INSTANCE).execute();
     } catch (IOException | RuntimeException e) {
       return CheckResult.failed(e);
     }
@@ -296,7 +319,7 @@ public abstract class ElasticsearchStorage extends zipkin2.storage.StorageCompon
     @Override
     public CheckResult convert(BufferedSource b) throws IOException {
       b.request(Long.MAX_VALUE); // Buffer the entire body.
-      Buffer body = b.buffer();
+      Buffer body = b.getBuffer();
       JsonReader status = enterPath(JsonReader.of(body.clone()), "status");
       if (status == null) {
         throw new IllegalStateException("Health status couldn't be read " + body.readUtf8());
@@ -315,21 +338,26 @@ public abstract class ElasticsearchStorage extends zipkin2.storage.StorageCompon
 
   @Memoized // since we don't want overlapping calls to apply the index templates
   IndexTemplates ensureIndexTemplates() {
-    String index = indexNameFormatter().index();
     try {
-      IndexTemplates templates = new VersionSpecificTemplates(this).get(http());
-      EnsureIndexTemplate.apply(http(), index + ":" + SPAN + "_template", templates.span());
-      EnsureIndexTemplate.apply(
-          http(), index + ":" + DEPENDENCY + "_template", templates.dependency());
+      IndexTemplates templates = new VersionSpecificTemplates(this).get();
+      HttpCall.Factory http = http();
+      ensureIndexTemplate(http, buildUrl(http, templates, SPAN), templates.span());
+      ensureIndexTemplate(http, buildUrl(http, templates, DEPENDENCY), templates.dependency());
+      ensureIndexTemplate(http, buildUrl(http, templates, AUTOCOMPLETE), templates.autocomplete());
       return templates;
     } catch (IOException e) {
       throw Platform.get().uncheckedIOException(e);
     }
   }
 
-  @Memoized
-  public // hosts resolution might imply a network call, and we might make a new okhttp instance
-  HttpCall.Factory http() {
+  HttpUrl buildUrl(HttpCall.Factory http, IndexTemplates templates, String type) {
+    HttpUrl.Builder builder = http.baseUrl.newBuilder("_template");
+    String indexPrefix = indexNameFormatter().index() + templates.indexTypeDelimiter();
+    return builder.addPathSegment(indexPrefix + type + "_template").build();
+  }
+
+  @Memoized // hosts resolution might imply a network call, and we might make a new okhttp instance
+  public HttpCall.Factory http() {
     List<String> hosts = hostsSupplier().get();
     if (hosts.isEmpty()) throw new IllegalArgumentException("no hosts configured");
     OkHttpClient ok =

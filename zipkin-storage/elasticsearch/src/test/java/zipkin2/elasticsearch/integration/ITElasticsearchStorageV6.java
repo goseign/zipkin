@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -34,7 +34,7 @@ import static zipkin2.elasticsearch.integration.ElasticsearchStorageRule.index;
 public class ITElasticsearchStorageV6 {
 
   static ElasticsearchStorageRule classRule() {
-    return new ElasticsearchStorageRule("openzipkin/zipkin-elasticsearch6:2.11.6",
+    return new ElasticsearchStorageRule("openzipkin/zipkin-elasticsearch6:2.13.0",
       "test_elasticsearch3");
   }
 
@@ -50,10 +50,6 @@ public class ITElasticsearchStorageV6 {
 
     @Override protected StorageComponent storage() {
       return storage;
-    }
-
-    // we don't map this in elasticsearch
-    @Test @Ignore @Override public void getSpanNames_mapsNameToRemoteServiceName() {
     }
 
     @Before @Override public void clear() throws IOException {
@@ -78,6 +74,38 @@ public class ITElasticsearchStorageV6 {
 
     @Before @Override public void clear() throws IOException {
       storage.clear();
+    }
+  }
+
+  public static class ITServiceAndSpanNames extends zipkin2.storage.ITServiceAndSpanNames {
+    @ClassRule public static ElasticsearchStorageRule backend = classRule();
+    @Rule public TestName testName = new TestName();
+
+    ElasticsearchStorage storage;
+
+    @Before public void connect() {
+      storage = backend.computeStorageBuilder().index(index(testName)).build();
+    }
+
+    @Override protected StorageComponent storage() {
+      return storage;
+    }
+
+    @Before @Override public void clear() throws IOException {
+      storage.clear();
+    }
+  }
+
+  public static class ITAutocompleteTags extends zipkin2.storage.ITAutocompleteTags {
+    @ClassRule public static ElasticsearchStorageRule backend = classRule();
+    @Rule public TestName testName = new TestName();
+
+    @Override protected StorageComponent.Builder storageBuilder() {
+      return backend.computeStorageBuilder().index(index(testName));
+    }
+
+    @Before @Override public void clear() throws IOException {
+      ((ElasticsearchStorage) storage).clear();
     }
   }
 

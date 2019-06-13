@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
 
-    Copyright 2015-2018 The OpenZipkin Authors
+    Copyright 2015-2019 The OpenZipkin Authors
 
     Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
     in compliance with the License. You may obtain a copy of the License at
@@ -18,13 +18,11 @@
   <modelVersion>4.0.0</modelVersion>
 
   <parent>
-    <groupId>io.zipkin.zipkin2</groupId>
-    <artifactId>parent</artifactId>
-    <version>2.11.9-SNAPSHOT</version>
+    <groupId>io.zipkin</groupId>
+    <artifactId>zipkin-parent</artifactId>
+    <version>2.14.2-SNAPSHOT</version>
   </parent>
 
-  <!-- TODO: group ID change: https://github.com/openzipkin/zipkin/issues/2132 -->
-  <groupId>io.zipkin.java</groupId>
   <artifactId>zipkin-server</artifactId>
   <name>Zipkin Server</name>
 
@@ -32,17 +30,17 @@
     <main.basedir>${project.basedir}/..</main.basedir>
     <main.java.version>1.8</main.java.version>
     <main.signature.artifact>java18</main.signature.artifact>
-    <start-class>zipkin.server.ZipkinServer</start-class>
-    <maven-invoker-plugin.version>3.1.0</maven-invoker-plugin.version>
+    <kotlin.version>1.3.31</kotlin.version>
+    <maven-invoker-plugin.version>3.2.0</maven-invoker-plugin.version>
+    <proto.generatedSourceDirectory>${project.build.directory}/generated-test-sources/wire</proto.generatedSourceDirectory>
   </properties>
 
   <dependencyManagement>
     <dependencies>
       <dependency>
-        <!-- Import dependency management from Spring Boot -->
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-dependencies</artifactId>
-        <version>${spring-boot.version}</version>
+        <groupId>com.linecorp.armeria</groupId>
+        <artifactId>armeria-bom</artifactId>
+        <version>${armeria.version}</version>
         <type>pom</type>
         <scope>import</scope>
       </dependency>
@@ -53,60 +51,102 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-web</artifactId>
+      <version>${spring-boot.version}</version>
     </dependency>
 
     <!-- Use log4j 2 instead of SLF4J to allow log4j 1.2 used by Kafka 0.8 to still work -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-log4j2</artifactId>
+      <version>${spring-boot.version}</version>
     </dependency>
 
-    <!-- reduces http transport latency -->
+    <!-- More efficient, gRPC ready server with brave tracing built-in -->
     <dependency>
-      <groupId>org.springframework.boot</groupId>
-      <artifactId>spring-boot-starter-undertow</artifactId>
-      <exclusions>
-        <exclusion>
-          <groupId>io.undertow</groupId>
-          <artifactId>undertow-websockets-jsr</artifactId>
-        </exclusion>
-      </exclusions>
+      <groupId>com.linecorp.armeria</groupId>
+      <artifactId>armeria-spring-boot-autoconfigure</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.linecorp.armeria</groupId>
+      <artifactId>armeria-spring-boot-actuator-starter</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.linecorp.armeria</groupId>
+      <artifactId>armeria-zipkin</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.linecorp.armeria</groupId>
+      <artifactId>armeria-grpc-protocol</artifactId>
     </dependency>
 
     <!-- zipkin requires exporting /health endpoint -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-actuator</artifactId>
+      <version>${spring-boot.version}</version>
     </dependency>
 
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-configuration-processor</artifactId>
+      <version>${spring-boot.version}</version>
       <optional>true</optional>
     </dependency>
 
     <dependency>
-      <groupId>io.zipkin.zipkin2</groupId>
+      <groupId>${project.groupId}.zipkin2</groupId>
       <artifactId>zipkin</artifactId>
-    </dependency>
-
-    <dependency>
-      <groupId>io.zipkin.zipkin2</groupId>
-      <artifactId>zipkin-collector</artifactId>
-    </dependency>
-
-    <!-- Static content for the web UI -->
-    <dependency>
-      <groupId>io.zipkin.java</groupId>
-      <artifactId>zipkin-autoconfigure-ui</artifactId>
       <version>${project.version}</version>
-      <optional>true</optional>
     </dependency>
 
-    <!-- Cassandra backend -->
+    <dependency>
+      <groupId>${project.groupId}.zipkin2</groupId>
+      <artifactId>zipkin-collector</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+
+    <!-- Static content for the Classic UI -->
     <dependency>
       <groupId>io.zipkin.java</groupId>
-      <artifactId>zipkin-autoconfigure-storage-cassandra</artifactId>
+      <artifactId>zipkin-ui</artifactId>
+      <version>2.12.10</version>
+    </dependency>
+    <!-- Static content for the Lens UI -->
+    <dependency>
+      <groupId>${project.groupId}</groupId>
+      <artifactId>zipkin-lens</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <!-- HTML library for injecting configurable <base> tag -->
+      <groupId>org.jsoup</groupId>
+      <artifactId>jsoup</artifactId>
+      <version>1.12.1</version>
+    </dependency>
+
+    <!-- to test the experimental grpc endpoint with the square/wire library -->
+    <dependency>
+      <groupId>io.zipkin.proto3</groupId>
+      <artifactId>zipkin-proto3</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.squareup.wire</groupId>
+      <artifactId>wire-grpc-client</artifactId>
+      <version>${wire.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.jetbrains.kotlin</groupId>
+      <artifactId>kotlin-stdlib</artifactId>
+      <version>${kotlin.version}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <!-- Cassandra and Cassandra 3 backends -->
+    <dependency>
+      <groupId>${project.groupId}.zipkin2</groupId>
+      <artifactId>zipkin-storage-cassandra-v1</artifactId>
       <version>${project.version}</version>
       <optional>true</optional>
       <exclusions>
@@ -143,61 +183,83 @@
       </exclusions>
     </dependency>
 
-    <!-- Cassandra 3 backend -->
-    <dependency>
-      <groupId>io.zipkin.java</groupId>
-      <artifactId>zipkin-autoconfigure-storage-cassandra3</artifactId>
-      <version>${project.version}</version>
-      <optional>true</optional>
-      <exclusions>
-        <exclusion>
-          <groupId>com.datastax.cassandra</groupId>
-          <artifactId>cassandra-driver-core</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>com.datastax.cassandra</groupId>
-          <artifactId>cassandra-driver-mapping</artifactId>
-        </exclusion>
-      </exclusions>
-    </dependency>
-
     <!-- Elasticsearch http -->
     <dependency>
-      <groupId>io.zipkin.java</groupId>
-      <artifactId>zipkin-autoconfigure-storage-elasticsearch</artifactId>
+      <groupId>${project.groupId}.zipkin2</groupId>
+      <artifactId>zipkin-storage-elasticsearch</artifactId>
       <version>${project.version}</version>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>com.squareup.okhttp3</groupId>
+      <artifactId>okhttp</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>com.squareup.okhttp3</groupId>
+      <artifactId>logging-interceptor</artifactId>
+      <version>${okhttp.version}</version>
       <optional>true</optional>
     </dependency>
 
     <!-- MySQL backend -->
     <dependency>
-      <groupId>io.zipkin.java</groupId>
-      <artifactId>zipkin-autoconfigure-storage-mysql</artifactId>
+      <groupId>${project.groupId}.zipkin2</groupId>
+      <artifactId>zipkin-storage-mysql-v1</artifactId>
       <version>${project.version}</version>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>org.mariadb.jdbc</groupId>
+      <artifactId>mariadb-java-client</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <groupId>com.zaxxer</groupId>
+      <artifactId>HikariCP</artifactId>
       <optional>true</optional>
     </dependency>
 
     <!-- Kafka Collector -->
     <dependency>
-      <groupId>io.zipkin.java</groupId>
-      <artifactId>zipkin-autoconfigure-collector-kafka</artifactId>
+      <groupId>${project.groupId}.zipkin2</groupId>
+      <artifactId>zipkin-collector-kafka</artifactId>
       <version>${project.version}</version>
       <optional>true</optional>
     </dependency>
 
     <!-- RabbitMQ Collector -->
     <dependency>
-      <groupId>io.zipkin.java</groupId>
-      <artifactId>zipkin-autoconfigure-collector-rabbitmq</artifactId>
+      <groupId>${project.groupId}.zipkin2</groupId>
+      <artifactId>zipkin-collector-rabbitmq</artifactId>
+      <version>${project.version}</version>
+      <optional>true</optional>
+    </dependency>
+
+    <!-- Scribe Collector -->
+    <dependency>
+      <groupId>${project.groupId}.zipkin2</groupId>
+      <artifactId>zipkin-collector-scribe</artifactId>
       <version>${project.version}</version>
       <optional>true</optional>
     </dependency>
 
     <!--Prometheus metrics-->
     <dependency>
-      <groupId>io.zipkin.java</groupId>
-      <artifactId>zipkin-autoconfigure-metrics-prometheus</artifactId>
-      <version>${project.version}</version>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-registry-prometheus</artifactId>
+      <version>${micrometer.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>com.netflix.concurrency-limits</groupId>
+      <artifactId>concurrency-limits-core</artifactId>
+      <version>0.3.2</version>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-core</artifactId>
+      <version>${micrometer.version}</version>
     </dependency>
 
     <!-- Trace api controller activity with Brave -->
@@ -221,26 +283,38 @@
     <dependency>
       <groupId>io.zipkin.brave.cassandra</groupId>
       <artifactId>brave-instrumentation-cassandra-driver</artifactId>
+      <version>0.10.2</version>
       <optional>true</optional>
     </dependency>
 
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
+      <version>${spring-boot.version}</version>
       <scope>test</scope>
     </dependency>
 
     <dependency>
-      <groupId>io.zipkin.zipkin2</groupId>
-      <artifactId>zipkin</artifactId>
-      <type>test-jar</type>
+      <groupId>${project.groupId}.zipkin2</groupId>
+      <artifactId>zipkin-tests</artifactId>
+      <version>${project.version}</version>
       <scope>test</scope>
     </dependency>
 
+    <dependency>
+      <groupId>com.squareup.okhttp3</groupId>
+      <artifactId>mockwebserver</artifactId>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>com.jayway.jsonpath</groupId>
       <artifactId>json-path</artifactId>
       <version>2.4.0</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-core</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>
@@ -249,20 +323,18 @@
     <profile>
       <id>integration</id>
       <activation>
-        <activeByDefault>true</activeByDefault>
+        <property>
+          <name>!skipTests</name>
+        </property>
       </activation>
       <build>
         <plugins>
           <plugin>
-            <groupId>org.apache.maven.plugins</groupId>
             <artifactId>maven-invoker-plugin</artifactId>
             <version>${maven-invoker-plugin.version}</version>
             <configuration>
               <cloneProjectsTo>${project.build.directory}/it</cloneProjectsTo>
               <settingsFile>src/it/settings.xml</settingsFile>
-              <profiles>
-                <profile>!release</profile>
-              </profiles>
               <localRepositoryPath>${project.build.directory}/local-repo</localRepositoryPath>
               <postBuildHookScript>verify</postBuildHookScript>
               <addTestClassPath>true</addTestClassPath>
@@ -292,24 +364,107 @@
       </resource>
     </resources>
     <plugins>
+      <!-- wire-maven-plugin cannot get proto definitions from dependencies, so we will -->
+      <plugin>
+        <artifactId>maven-dependency-plugin</artifactId>
+      </plugin>
+      <plugin>
+        <groupId>com.squareup.wire</groupId>
+        <artifactId>wire-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <phase>generate-test-sources</phase>
+            <goals>
+              <goal>generate-sources</goal>
+            </goals>
+            <configuration>
+              <generatedSourceDirectory>${proto.generatedSourceDirectory}</generatedSourceDirectory>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.jetbrains.kotlin</groupId>
+        <artifactId>kotlin-maven-plugin</artifactId>
+        <version>${kotlin.version}</version>
+        <configuration>
+          <jvmTarget>${main.java.version}</jvmTarget>
+        </configuration>
+        <executions>
+          <execution>
+            <id>compile</id>
+            <phase>none</phase>
+          </execution>
+          <execution>
+            <id>test-compile</id>
+            <goals>
+              <goal>test-compile</goal>
+            </goals>
+            <configuration>
+              <sourceDirs>
+                <sourceDir>${project.basedir}/src/test/kotlin</sourceDir>
+                <!-- TODO: this is java, but... https://github.com/square/wire/issues/953 -->
+                <sourceDir>${proto.generatedSourceDirectory}</sourceDir>
+              </sourceDirs>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <!-- Adds the output directory from proto source generation for the test compiler -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>build-helper-maven-plugin</artifactId>
+        <version>3.0.0</version>
+        <executions>
+          <execution>
+            <id>add-test-source</id>
+            <phase>generate-test-sources</phase>
+            <goals>
+              <goal>add-test-source</goal>
+            </goals>
+            <configuration>
+              <sources>
+                <source>${proto.generatedSourceDirectory}</source>
+              </sources>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>${maven-compiler-plugin.version}</version>
+        <executions>
+          <!-- Defer test compilation to the kotlin plugin -->
+          <execution>
+            <id>default-testCompile</id>
+            <phase>none</phase>
+          </execution>
+          <execution>
+            <id>java-test-compile</id>
+            <phase>test-compile</phase>
+            <goals>
+              <goal>testCompile</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
       <plugin>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-maven-plugin</artifactId>
-        <configuration>
-          <classifier>exec</classifier>
-          <executable>true</executable>
-          <excludeArtifactIds>logback-classic</excludeArtifactIds>
-        </configuration>
-      </plugin>
-      <!-- disable retrolambda since this module uses java 8 types -->
-      <plugin>
-        <groupId>net.orfjackal.retrolambda</groupId>
-        <artifactId>retrolambda-maven-plugin</artifactId>
+        <version>${spring-boot.version}</version>
         <executions>
           <execution>
-            <phase>none</phase>
+            <goals>
+              <goal>repackage</goal>
+            </goals>
           </execution>
         </executions>
+        <configuration>
+          <mainClass>zipkin.server.ZipkinServer</mainClass>
+          <classifier>exec</classifier>
+          <executable>true</executable>
+        </configuration>
       </plugin>
     </plugins>
   </build>

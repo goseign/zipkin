@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -44,12 +44,16 @@ class RabbitMQCollectorRule extends ExternalResource {
 
   @Override
   protected void before() {
-    try {
-      LOGGER.info("Starting docker image " + image);
-      container = new GenericContainer(image).withExposedPorts(RABBIT_PORT);
-      container.start();
-    } catch (RuntimeException e) {
-      LOGGER.warn("Couldn't start docker image " + image + ": " + e.getMessage(), e);
+    if (!"true".equals(System.getProperty("docker.skip"))) {
+      try {
+        LOGGER.info("Starting docker image " + image);
+        container = new GenericContainer(image).withExposedPorts(RABBIT_PORT);
+        container.start();
+      } catch (RuntimeException e) {
+        LOGGER.warn("Couldn't start docker image " + image + ": " + e.getMessage(), e);
+      }
+    } else {
+      LOGGER.info("Skipping startup of docker " + image);
     }
 
     try {
@@ -65,7 +69,11 @@ class RabbitMQCollectorRule extends ExternalResource {
 
   RabbitMQCollector tryToInitializeCollector() {
     RabbitMQCollector result = computeCollectorBuilder().build();
-    result.start();
+    try {
+      result.start();
+    } catch (RuntimeException e) {
+      throw new AssumptionViolatedException(e.getMessage(), e);
+    }
 
     CheckResult check = result.check();
     if (!check.ok()) {

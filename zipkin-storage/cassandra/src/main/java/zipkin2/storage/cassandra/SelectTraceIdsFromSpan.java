@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -15,16 +15,15 @@ package zipkin2.storage.cassandra;
 
 import com.datastax.driver.core.BoundStatement;
 import com.datastax.driver.core.PreparedStatement;
+import com.datastax.driver.core.ResultSet;
 import com.datastax.driver.core.ResultSetFuture;
 import com.datastax.driver.core.Row;
 import com.datastax.driver.core.Session;
 import com.datastax.driver.core.querybuilder.QueryBuilder;
 import com.datastax.driver.core.querybuilder.Select;
 import com.google.auto.value.AutoValue;
-import java.util.AbstractMap;
-import java.util.LinkedHashSet;
-import java.util.Map.Entry;
-import java.util.Set;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.BiConsumer;
 import java.util.function.Supplier;
@@ -51,7 +50,7 @@ import static zipkin2.storage.cassandra.Schema.TABLE_SPAN;
  * and over-fetch function of 3 * intended limit will work. See {@link
  * CassandraStorage#indexFetchMultiplier()} for an associated parameter.
  */
-final class SelectTraceIdsFromSpan extends ResultSetFutureCall {
+final class SelectTraceIdsFromSpan extends ResultSetFutureCall<ResultSet> {
   @AutoValue
   abstract static class Input {
     @Nullable
@@ -96,7 +95,7 @@ final class SelectTraceIdsFromSpan extends ResultSetFutureCall {
                   .allowFiltering());
     }
 
-    Call<Set<Entry<String, Long>>> newCall(
+    Call<Map<String, Long>> newCall(
         @Nullable String serviceName,
         String annotationKey,
         TimestampRange timestampRange,
@@ -141,6 +140,10 @@ final class SelectTraceIdsFromSpan extends ResultSetFutureCall {
     return factory.session.executeAsync(bound);
   }
 
+  @Override public ResultSet map(ResultSet input) {
+    return input;
+  }
+
   @Override
   public SelectTraceIdsFromSpan clone() {
     return new SelectTraceIdsFromSpan(factory, preparedStatement, input);
@@ -151,24 +154,20 @@ final class SelectTraceIdsFromSpan extends ResultSetFutureCall {
     return input.toString().replace("Input", "SelectTraceIdsFromSpan");
   }
 
-  static final class AccumulateTraceIdTsLong
-      extends AccumulateAllResults<Set<Entry<String, Long>>> {
+  static final class AccumulateTraceIdTsLong extends AccumulateAllResults<Map<String, Long>> {
 
-    @Override
-    protected Supplier<Set<Entry<String, Long>>> supplier() {
-      return LinkedHashSet::new; // because results are not distinct
+    @Override protected Supplier<Map<String, Long>> supplier() {
+      return LinkedHashMap::new; // because results are not distinct
     }
 
-    @Override
-    protected BiConsumer<Row, Set<Entry<String, Long>>> accumulator() {
+    @Override protected BiConsumer<Row, Map<String, Long>> accumulator() {
       return (row, result) -> {
         if (row.isNull("ts")) return;
-        result.add(new AbstractMap.SimpleEntry<>(row.getString("trace_id"), row.getLong("ts")));
+        result.put(row.getString("trace_id"), row.getLong("ts"));
       };
     }
 
-    @Override
-    public String toString() {
+    @Override public String toString() {
       return "AccumulateTraceIdTsLong{}";
     }
   }

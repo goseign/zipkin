@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -24,6 +24,7 @@ import zipkin2.TestObjects;
 
 import static java.util.Arrays.asList;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.entry;
 
 public class QueryRequestTest {
   @Rule public ExpectedException thrown = ExpectedException.none();
@@ -41,6 +42,16 @@ public class QueryRequestTest {
 
   @Test public void serviceName_coercesEmptyToNull() {
     assertThat(queryBuilder.serviceName("").build().serviceName())
+      .isNull();
+  }
+
+  @Test public void remoteServiceNameCanBeNull() {
+    assertThat(queryBuilder.build().remoteServiceName())
+      .isNull();
+  }
+
+  @Test public void remoteServiceName_coercesEmptyToNull() {
+    assertThat(queryBuilder.remoteServiceName("").build().remoteServiceName())
       .isNull();
   }
 
@@ -62,11 +73,45 @@ public class QueryRequestTest {
       .isEmpty();
   }
 
+  @Test public void annotationQueryTrimsSpaces() {
+    // spaces in http.path mixed with 'and'
+    assertThat(queryBuilder.parseAnnotationQuery("fo and o and bar and http.path = /a ").annotationQuery)
+      .containsOnly(entry("fo", ""), entry("o", ""), entry("bar", ""), entry("http.path", "/a"));
+    // http.path in the beginning, more spaces
+    assertThat(queryBuilder.parseAnnotationQuery(" http.path = /a   and fo and o   and bar").annotationQuery)
+      .containsOnly(entry("fo", ""), entry("o", ""), entry("bar", ""), entry("http.path", "/a"));
+    // @adriancole said this would be hard to parse, annotation containing spaces
+    assertThat(queryBuilder.parseAnnotationQuery("L O L").annotationQuery)
+      .containsOnly(entry("L O L", ""));
+    // annotation with spaces combined with tag
+    assertThat(queryBuilder.parseAnnotationQuery("L O L and http.path = /a").annotationQuery)
+      .containsOnly(entry("L O L", ""), entry("http.path", "/a"));
+    assertThat(queryBuilder.parseAnnotationQuery("bar =123 and L O L and http.path = /a and A B C").annotationQuery)
+      .containsOnly(entry("L O L", ""), entry("http.path", "/a"), entry("bar", "123"), entry("A B C", ""));
+  }
+
+  @Test public void annotationQueryParameterSpecificity() {
+    // when a parameter is specified both as a tag and annotation, the tag wins because it's considered to be more
+    // specific
+    assertThat(queryBuilder.parseAnnotationQuery("a=123 and a").annotationQuery).containsOnly(entry("a", "123"));
+    assertThat(queryBuilder.parseAnnotationQuery("a and a=123").annotationQuery).containsOnly(entry("a", "123"));
+    // also last tag wins
+    assertThat(queryBuilder.parseAnnotationQuery("a=123 and a=456").annotationQuery).containsOnly(entry("a", "456"));
+    assertThat(queryBuilder.parseAnnotationQuery("a and a=123 and a=456").annotationQuery).containsOnly(entry("a", "456"));
+  }
+
   @Test public void endTsMustBePositive() {
     thrown.expect(IllegalArgumentException.class);
     thrown.expectMessage("endTs <= 0");
 
     queryBuilder.endTs(0L).build();
+  }
+
+  @Test public void lookbackMustBePositive() {
+    thrown.expect(IllegalArgumentException.class);
+    thrown.expectMessage("lookback <= 0");
+
+    queryBuilder.lookback(0).build();
   }
 
   @Test public void limitMustBePositive() {
@@ -193,6 +238,18 @@ public class QueryRequestTest {
       .isFalse();
 
     assertThat(request.test(asList(span.toBuilder().name("aloha").build())))
+      .isTrue();
+  }
+
+  @Test public void test_remoteServiceName() {
+    QueryRequest request = queryBuilder
+      .remoteServiceName("db")
+      .build();
+
+    assertThat(request.test(asList(span)))
+      .isFalse();
+
+    assertThat(request.test(asList(span.toBuilder().remoteEndpoint(Endpoint.newBuilder().serviceName("db").build()).build())))
       .isTrue();
   }
 

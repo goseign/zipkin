@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -21,31 +21,29 @@ import static zipkin2.TestObjects.CLIENT_SPAN;
 import static zipkin2.internal.Proto3ZipkinFields.SPAN;
 
 public class Proto3SpanWriterTest {
-  Buffer buf = new Buffer(2048); // bigger than needed to test sizeOf
-
   Proto3SpanWriter writer = new Proto3SpanWriter();
 
   /** proto messages always need a key, so the non-list form is just a single-field */
   @Test public void write_startsWithSpanKeyAndLengthPrefix() {
-    byte[] buff = writer.write(CLIENT_SPAN);
+    byte[] bytes = writer.write(CLIENT_SPAN);
 
-    assertThat(buff)
+    assertThat(bytes)
       .hasSize(writer.sizeInBytes(CLIENT_SPAN))
       .startsWith((byte) 10, SPAN.sizeOfValue(CLIENT_SPAN));
   }
 
   @Test public void writeList_startsWithSpanKeyAndLengthPrefix() {
-    byte[] buff = writer.writeList(asList(CLIENT_SPAN));
+    byte[] bytes = writer.writeList(asList(CLIENT_SPAN));
 
-    assertThat(buff)
+    assertThat(bytes)
       .hasSize(writer.sizeInBytes(CLIENT_SPAN))
       .startsWith((byte) 10, SPAN.sizeOfValue(CLIENT_SPAN));
   }
 
   @Test public void writeList_multiple() {
-    byte[] buff = writer.writeList(asList(CLIENT_SPAN, CLIENT_SPAN));
+    byte[] bytes = writer.writeList(asList(CLIENT_SPAN, CLIENT_SPAN));
 
-    assertThat(buff)
+    assertThat(bytes)
       .hasSize(writer.sizeInBytes(CLIENT_SPAN) * 2)
       .startsWith((byte) 10, SPAN.sizeOfValue(CLIENT_SPAN));
   }
@@ -56,9 +54,10 @@ public class Proto3SpanWriterTest {
   }
 
   @Test public void writeList_offset_startsWithSpanKeyAndLengthPrefix() {
-    writer.writeList(asList(CLIENT_SPAN, CLIENT_SPAN), buf.toByteArray(), 0);
+    byte[] bytes = new byte[2048];
+    writer.writeList(asList(CLIENT_SPAN, CLIENT_SPAN), bytes, 0);
 
-    assertThat(buf.toByteArray())
+    assertThat(bytes)
       .startsWith((byte) 10, SPAN.sizeOfValue(CLIENT_SPAN));
   }
 }

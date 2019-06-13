@@ -1,4 +1,4 @@
-# collector-kafka10
+# collector-kafka
 
 ## KafkaCollector
 This collector is implemented as a Kafka consumer supporting Kafka brokers running
@@ -7,7 +7,7 @@ a list of spans in json or TBinaryProtocol big-endian encoding. These
 spans are pushed to a span consumer.
 
 For information about running this collector as a module in Zipkin server, see
-[zipkin-autoconfigure/collector-kafka10](../../zipkin-autoconfigure/collector-kafka10/).
+the [Zipkin Server README](../../zipkin-server/README.md).
 
 When using this collector as a library outside of Zipkin server,
 [zipkin2.collector.kafka.KafkaCollector.Builder](src/main/java/zipkin2/collector/kafka/KafkaCollector.java)
@@ -15,7 +15,7 @@ includes defaults that will operate against a Kafka topic name `zipkin`.
 
 ## Encoding spans into Kafka messages
 The message's binary data includes a list of spans. Supported encodings
-are the same as the http [POST /spans](http://zipkin.io/zipkin-api/#/paths/%252Fspans) body.
+are the same as the http [POST /spans](https://zipkin.io/zipkin-api/#/paths/%252Fspans) body.
 
 ### Json
 The message's binary data is a list of spans in json. The first character must be '[' (decimal 91).
@@ -26,7 +26,7 @@ Here's an example, sending a list of a single span to the zipkin topic:
 
 ```bash
 $ kafka-console-producer.sh --broker-list $ADVERTISED_HOST:9092 --topic zipkin
-[{"traceId":"1","name":"bang","id":"2","timestamp":1234,"binaryAnnotations":[{"key":"lc","value":"bamm-bamm","endpoint":{"serviceName":"flintstones","ipv4":"127.0.0.1"}}]}]
+[{"traceId":"1","name":"bang","id":"2","timestamp":1470150004071068,"duration":1,"localEndpoint":{"serviceName":"flintstones"},"tags":{"lc":"bamm-bamm"}}]
 ```
 
 ### Thrift

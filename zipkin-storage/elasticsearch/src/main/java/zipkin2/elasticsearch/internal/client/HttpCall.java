@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -28,7 +28,7 @@ import okio.Okio;
 import zipkin2.Call;
 import zipkin2.Callback;
 
-public final class HttpCall<V> extends Call<V> {
+public final class HttpCall<V> extends Call.Base<V> {
 
   public interface BodyConverter<V> {
     V convert(BufferedSource content) throws IOException;
@@ -58,7 +58,6 @@ public final class HttpCall<V> extends Call<V> {
   public final BodyConverter<V> bodyConverter;
   final Semaphore semaphore;
 
-
   HttpCall(Factory factory, Request request, BodyConverter<V> bodyConverter) {
     this(
       factory.ok.newCall(request),
@@ -73,7 +72,7 @@ public final class HttpCall<V> extends Call<V> {
     this.bodyConverter = bodyConverter;
   }
 
-  @Override public V execute() throws IOException {
+  @Override protected V doExecute() throws IOException {
     if (!semaphore.tryAcquire()) throw new IllegalStateException("over capacity");
     try {
       return parseResponse(call.execute(), bodyConverter);
@@ -82,24 +81,25 @@ public final class HttpCall<V> extends Call<V> {
     }
   }
 
-  @Override public void enqueue(Callback<V> delegate) {
+  @Override protected void doEnqueue(Callback<V> callback) {
     if (!semaphore.tryAcquire()) {
-      delegate.onError(new IllegalStateException("over capacity"));
+      callback.onError(new IllegalStateException("over capacity"));
       return;
     }
-    call.enqueue(new V2CallbackAdapter<>(semaphore, bodyConverter, delegate));
+    call.enqueue(new V2CallbackAdapter<>(semaphore, bodyConverter, callback));
   }
 
-  @Override public void cancel() {
+  @Override protected void doCancel() {
     call.cancel();
-  }
-
-  @Override public boolean isCanceled() {
-    return call.isCanceled();
   }
 
   @Override public HttpCall<V> clone() {
     return new HttpCall<V>(call.clone(), semaphore, bodyConverter);
+  }
+
+  @Override
+  public String toString() {
+    return "HttpCall(" + call + ")";
   }
 
   static class V2CallbackAdapter<V> implements okhttp3.Callback {

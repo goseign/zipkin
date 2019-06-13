@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -21,8 +21,7 @@ import static java.util.Arrays.asList;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public final class DependenciesTest {
-  @Test
-  public void dependenciesRoundTrip() {
+  @Test public void dependenciesRoundTrip() {
     DependencyLink ab = DependencyLink.newBuilder().parent("a").child("b").callCount(2L).build();
     DependencyLink cd = DependencyLink.newBuilder().parent("c").child("d").errorCount(2L).build();
 
@@ -30,7 +29,5 @@ public final class DependenciesTest {
 
     ByteBuffer bytes = dependencies.toThrift();
     assertThat(Dependencies.fromThrift(bytes)).isEqualTo(dependencies);
-
-    assertThat(bytes.remaining()).isZero();
   }
 }

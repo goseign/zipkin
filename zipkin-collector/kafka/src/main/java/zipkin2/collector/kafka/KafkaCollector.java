@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -16,13 +16,10 @@ package zipkin2.collector.kafka;
 import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
-
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.common.KafkaException;
 import org.apache.kafka.common.KafkaFuture;
@@ -223,9 +220,15 @@ public final class KafkaCollector extends CollectorComponent {
     void close() {
       ExecutorService maybePool = pool;
       if (maybePool == null) return;
-      maybePool.shutdownNow();
+      for (KafkaCollectorWorker worker : workers) {
+        worker.stop();
+      }
+      maybePool.shutdown();
       try {
-        maybePool.awaitTermination(1, TimeUnit.SECONDS);
+        if (!maybePool.awaitTermination(2, TimeUnit.SECONDS)) {
+          // Timeout exceeded: force shutdown
+          maybePool.shutdownNow();
+        }
       } catch (InterruptedException e) {
         // at least we tried
       }

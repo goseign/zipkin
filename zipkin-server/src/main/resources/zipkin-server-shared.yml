@@ -12,6 +12,9 @@ zipkin:
     http:
       # Set to false to disable creation of spans via HTTP collector API
       enabled: ${HTTP_COLLECTOR_ENABLED:true}
+    grpc:
+      # Set to true to enable the GRPC collector
+      enabled: ${COLLECTOR_GRPC_ENABLED:false}
     kafka:
       # Kafka bootstrap broker list, comma-separated host:port values. Setting this activates the
       # Kafka 0.10+ collector.
@@ -34,11 +37,15 @@ zipkin:
       virtual-host: ${RABBIT_VIRTUAL_HOST:/}
       useSsl: ${RABBIT_USE_SSL:false}
       uri: ${RABBIT_URI:}
+    scribe:
+      enabled: ${SCRIBE_ENABLED:false}
+      category: ${SCRIBE_CATEGORY:zipkin}
+      port: ${COLLECTOR_PORT:9410}
   query:
     enabled: ${QUERY_ENABLED:true}
     # 1 day in millis
     lookback: ${QUERY_LOOKBACK:86400000}
-    # The Cache-Control max-age (seconds) for /api/v2/services and /api/v2/spans
+    # The Cache-Control max-age (seconds) for /api/v2/services, /api/v2/remoteServices and /api/v2/spans
     names-max-age: 300
     # CORS allowed-origins.
     allowed-origins: "*"
@@ -46,7 +53,15 @@ zipkin:
   storage:
     strict-trace-id: ${STRICT_TRACE_ID:true}
     search-enabled: ${SEARCH_ENABLED:true}
+    autocomplete-keys: ${AUTOCOMPLETE_KEYS:}
+    autocomplete-ttl: ${AUTOCOMPLETE_TTL:3600000}
+    autocomplete-cardinality: 20000
     type: ${STORAGE_TYPE:mem}
+    throttle:
+      enabled: ${STORAGE_THROTTLE_ENABLED:false}
+      min-concurrency: ${STORAGE_THROTTLE_MIN_CONCURRENCY:10}
+      max-concurrency: ${STORAGE_THROTTLE_MAX_CONCURRENCY:200}
+      max-queue-size: ${STORAGE_THROTTLE_MAX_QUEUE_SIZE:1000}
     mem:
       # Maximum number of spans to keep in memory.  When exceeded, oldest traces (and their spans) will be purged.
       # A safe estimate is 1K of memory per span (each span with 2 annotations + 1 binary annotation), plus
@@ -64,7 +79,7 @@ zipkin:
       keyspace: ${CASSANDRA_KEYSPACE:zipkin}
       # Max pooled connections per datacenter-local host.
       max-connections: ${CASSANDRA_MAX_CONNECTIONS:8}
-      # Ensuring that schema exists, if enabled tries to execute script /zipkin-cassandra-core/resources/cassandra-schema-cql3.txt.
+      # Ensuring that schema exists, if enabled tries to execute script /zipkin-cassandra-core/resources/cassandra-schema.cql.
       ensure-schema: ${CASSANDRA_ENSURE_SCHEMA:true}
       # 7 days in seconds
       span-ttl: ${CASSANDRA_SPAN_TTL:604800}
@@ -138,6 +153,8 @@ zipkin:
     instrumented: .*
     # URL placed into the <base> tag in the HTML
     base-path: /zipkin
+    # When false, disables the "Try Lens UI" button in the navigation page
+    suggest-lens: true
 
 server:
   port: ${QUERY_PORT:9411}
@@ -147,6 +164,17 @@ server:
     # compresses any response over min-response-size (default is 2KiB)
     # Includes dynamic json content and large static assets from zipkin-ui
     mime-types: application/json,application/javascript,text/css,image/svg
+
+spring.main.web-application-type: none
+
+# We are using Armeria instead of Tomcat. Have it inherit the default configuration from Spring
+armeria:
+  ports:
+    - port: ${server.port}
+      protocols:
+        - http
+  gracefulShutdownQuietPeriodMillis: -1
+  gracefulShutdownTimeoutMillis: -1
 
 spring:
   jmx:
@@ -160,6 +188,7 @@ spring:
     exclude:
       # otherwise we might initialize even when not needed (ex when storage type is cassandra)
       - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.jooq.JooqAutoConfiguration
 info:
   zipkin:
     version: "@project.version@"

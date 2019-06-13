@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -18,17 +18,20 @@ import org.junit.rules.TestRule;
 import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
 import org.mariadb.jdbc.MariaDbDataSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static org.junit.Assume.assumeTrue;
 
 public class LazyMySQLStorage implements TestRule {
+  static final Logger LOGGER = LoggerFactory.getLogger(LazyMySQLStorage.class);
 
-  final String version;
+  final String image;
 
   ZipkinMySQLContainer container;
 
-  LazyMySQLStorage(String version) {
-    this.version = version;
+  LazyMySQLStorage(String image) {
+    this.image = image;
   }
 
   MySQLStorage storage;
@@ -36,12 +39,16 @@ public class LazyMySQLStorage implements TestRule {
     // tests don't have race conditions as they aren't run multithreaded
     if (storage != null) return storage;
 
-    try {
-      container = new ZipkinMySQLContainer(version);
-      container.start();
-      System.out.println("Will use TestContainers MySQL instance");
-    } catch (Exception e) {
-      // Ignored
+    if (!"true".equals(System.getProperty("docker.skip"))) {
+      try {
+        container = new ZipkinMySQLContainer(image);
+        container.start();
+        LOGGER.info("Starting docker image " + container.getDockerImageName());
+      } catch (Exception e) {
+        LOGGER.warn("Couldn't start docker image " + container.getDockerImageName(), e);
+      }
+    } else {
+      LOGGER.info("Skipping startup of docker");
     }
 
     // TODO call .check()

@@ -2,8 +2,8 @@
 
 This is is a plugin to the Elasticsearch storage component, which uses
 HTTP by way of [OkHttp 3](https://github.com/square/okttp) and
-[Moshi](https://github.com/square/moshi). This currently supports 2.x,
-5.x and 6.x version families.
+[Moshi](https://github.com/square/moshi). This uses Elasticsearch 5+
+features, but is tested against Elasticsearch 6-7.x.
 
 ## Multiple hosts
 Most users will supply a DNS name that's mapped to multiple A or AAAA
@@ -22,7 +22,7 @@ Here are some examples:
 * http://elasticsearch-1:9200,http://elasticsearch-2:9200
 
 ## Format
-Spans are stored in version 2 format, which is the same as the [v2 POST endpoint](http://zipkin.io/zipkin-api/#/default/post_spans)
+Spans are stored in version 2 format, which is the same as the [v2 POST endpoint](https://zipkin.io/zipkin-api/#/default/post_spans)
 with one difference described below. We add a "timestamp_millis" field
 to aid in integration with other tools.
 
@@ -33,7 +33,8 @@ spans. This is mapped to the Elasticsearch date type, so can be used to any date
 
 ## Indexes
 Spans are stored into daily indices, for example spans with a timestamp
-falling on 2016/03/19 will be stored in the index named 'zipkin:span-2016-03-19'.
+falling on 2016/03/19 will be stored in the index named 'zipkin:span-2016-03-19'
+or 'zipkin-span-2016-03-19' if using Elasticsearch version 7 or higher.
 There is no support for TTL through this SpanStore. It is recommended
 instead to use [Elastic Curator](https://www.elastic.co/guide/en/elasticsearch/client/curator/current/about.html)
 to remove indices older than the point you are interested in.
@@ -45,9 +46,9 @@ the date separator from '-' to something else.
 `ElasticsearchStorage.Builder.index` and `ElasticsearchStorage.Builder.dateSeparator`
 control the daily index format.
 
-For example, spans with a timestamp falling on 2016/03/19 end up in the
-index 'zipkin:span-2016-03-19'. When the date separator is '.', the index
-would be 'zipkin:span-2016.03.19'.
+For example, using Elasticsearch 7+, spans with a timestamp falling on
+2016/03/19 end up in the index 'zipkin-span-2016-03-19'. When the date
+separator is '.', the index would be 'zipkin-span-2016.03.19'.
 
 ### String Mapping
 The Zipkin api implies aggregation and exact match (keyword) on string
@@ -63,7 +64,7 @@ The values in `q` are limited to 256 characters and searched as keywords.
 
 You can check these manually like so:
 ```bash
-$ curl -s localhost:9200/zipkin:span-2017-08-11/_search?q=_q:error=500
+$ curl -s 'localhost:9200/zipkin*span-2017-08-11/_search?q=_q:error=500'
 ```
 
 The reason for special casing is around dotted name constraints. Tags
@@ -103,7 +104,7 @@ your indexes:
 
 ```bash
 # the output below shows which tokens will match on the trace id supplied.
-$ curl -s localhost:9200/zipkin:span-2017-08-22/_analyze -d '{
+$ curl -s 'localhost:9200/zipkin*span-2017-08-22/_analyze' -d '{
       "text": "48485a3953bb61246b221d5bc9e6496c",
       "analyzer": "traceId_analyzer"
   }'|jq '.tokens|.[]|.token'
@@ -122,8 +123,7 @@ be written, nor analyzed.
 
 ## Customizing the ingest pipeline
 
-When using Elasticsearch 5.x, you can setup an [ingest pipeline](https://www.elastic.co/guide/en/elasticsearch/reference/master/pipeline.html)
-to perform custom processing.
+You can setup an [ingest pipeline](https://www.elastic.co/guide/en/elasticsearch/reference/master/pipeline.html) to perform custom processing.
 
 Here's an example, which you'd setup prior to configuring Zipkin to use
 it via `ElasticsearchStorage.Builder.pipeline`
@@ -143,3 +143,10 @@ PUT _ingest/pipeline/zipkin
   ]
 }
 ```
+
+## Tuning
+
+### Autocomplete indexing
+Redundant requests to store autocomplete values are ignored for an hour
+to reduce load. This is implemented by
+[DelayLimiter](../../zipkin/src/main/java/zipkin2/internal/DelayLimiter.java)

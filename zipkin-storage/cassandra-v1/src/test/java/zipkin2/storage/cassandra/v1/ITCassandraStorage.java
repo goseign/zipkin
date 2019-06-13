@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -18,6 +18,7 @@ import com.datastax.driver.core.Session;
 import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.Uninterruptibles;
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -47,7 +48,7 @@ import static zipkin2.storage.cassandra.v1.InternalForTests.writeDependencyLinks
 public class ITCassandraStorage {
 
   static CassandraStorageRule classRule() {
-    return new CassandraStorageRule("openzipkin/zipkin-cassandra:2.11.6", "test_cassandra3");
+    return new CassandraStorageRule("openzipkin/zipkin-cassandra:2.13.0", "test_cassandra3");
   }
 
   public static class ITSpanStore extends zipkin2.storage.ITSpanStore {
@@ -64,7 +65,16 @@ public class ITCassandraStorage {
       return storage;
     }
 
-    @Override @Test @Ignore("Multiple services unsupported") public void getTraces_tags() {
+    @Override @Test @Ignore("All services query unsupported when combined with other qualifiers")
+    public void getTraces_tags() {
+    }
+
+    @Override @Test @Ignore("All services query unsupported when combined with other qualifiers")
+    public void getTraces_serviceNames() {
+    }
+
+    @Override @Test @Ignore("All services query unsupported when combined with other qualifiers")
+    public void getTraces_spanName() {
     }
 
     @Override @Test @Ignore("Duration unsupported") public void getTraces_duration() {
@@ -74,6 +84,12 @@ public class ITCassandraStorage {
     }
 
     @Override @Test @Ignore("Duration unsupported") public void getTraces_maxDuration() {
+    }
+
+    @Override @Test @Ignore("Duration unsupported") public void getTraces_lateDuration() {
+    }
+
+    @Override @Test @Ignore("No consumer-side span deduplication") public void deduplicates() {
     }
 
     @Test public void overFetchesToCompensateForDuplicateIndexData() throws IOException {
@@ -95,12 +111,13 @@ public class ITCassandraStorage {
 
       // Index ends up containing more rows than services * trace count, and cannot be de-duped
       // in a server-side query.
+      int localServiceCount = storage().serviceAndSpanNames().getServiceNames().execute().size();
       assertThat(storage
         .session()
         .execute("SELECT COUNT(*) from service_name_index")
         .one()
         .getLong(0))
-        .isGreaterThan(traceCount * store().getServiceNames().execute().size());
+        .isGreaterThan(traceCount * localServiceCount);
 
       // Implementation over-fetches on the index to allow the user to receive unsurprising results.
       QueryRequest request = requestBuilder()
@@ -152,6 +169,26 @@ public class ITCassandraStorage {
     }
   }
 
+  public static class ITSearchEnabledFalse extends zipkin2.storage.ITSearchEnabledFalse {
+    @ClassRule public static CassandraStorageRule backend = classRule();
+    @Rule public TestName testName = new TestName();
+
+    CassandraStorage storage;
+
+    @Before public void connect() {
+      storage =
+        backend.computeStorageBuilder().keyspace(keyspace(testName)).searchEnabled(false).build();
+    }
+
+    @Override protected StorageComponent storage() {
+      return storage;
+    }
+
+    @Before @Override public void clear() {
+      dropKeyspace(backend.session(), keyspace(testName));
+    }
+  }
+
   public static class ITStrictTraceIdFalse extends zipkin2.storage.ITStrictTraceIdFalse {
     @ClassRule public static CassandraStorageRule backend = classRule();
     @Rule public TestName testName = new TestName();
@@ -165,6 +202,38 @@ public class ITCassandraStorage {
 
     @Override protected StorageComponent storage() {
       return storage;
+    }
+
+    @Before @Override public void clear() {
+      dropKeyspace(backend.session(), keyspace(testName));
+    }
+  }
+
+  public static class ITServiceAndSpanNames extends zipkin2.storage.ITServiceAndSpanNames {
+    @ClassRule public static CassandraStorageRule backend = classRule();
+    @Rule public TestName testName = new TestName();
+
+    CassandraStorage storage;
+
+    @Before public void connect() {
+      storage = backend.computeStorageBuilder().keyspace(keyspace(testName)).build();
+    }
+
+    @Override protected StorageComponent storage() {
+      return storage;
+    }
+
+    @Before @Override public void clear() {
+      dropKeyspace(backend.session(), keyspace(testName));
+    }
+  }
+
+  public static class ITAutocompleteTags extends zipkin2.storage.ITAutocompleteTags {
+    @ClassRule public static CassandraStorageRule backend = classRule();
+    @Rule public TestName testName = new TestName();
+
+    @Override protected StorageComponent.Builder storageBuilder() {
+      return backend.computeStorageBuilder().keyspace(keyspace(testName));
     }
 
     @Before @Override public void clear() {
@@ -210,6 +279,10 @@ public class ITCassandraStorage {
 
     @Override protected Session session() {
       return backend.session;
+    }
+
+    @Override InetSocketAddress contactPoint() {
+      return backend.contactPoint();
     }
   }
 

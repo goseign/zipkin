@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -13,6 +13,9 @@
  */
 package zipkin2.internal;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import org.junit.Test;
 import zipkin2.Endpoint;
@@ -21,6 +24,7 @@ import zipkin2.Span.Kind;
 
 import static java.util.Arrays.asList;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 public class TraceTest {
 
@@ -41,6 +45,21 @@ public class TraceTest {
       span("a", null, "a", Kind.SERVER, "frontend", null, false),
       span("a", "a", "b", Kind.CLIENT, "frontend", null, false),
       span("a", "a", "b", Kind.SERVER, "backend", null, true)
+    );
+  }
+
+  @Test public void backfillsMissingSharedFlag() {
+    List<Span> trace = asList(
+      span("a", null, "a", Kind.SERVER, "frontend", null, false),
+      span("a", "a", "b", Kind.CLIENT, "frontend", "1.2.3.4", false),
+      // below the shared flag was forgotten
+      span("a", "a", "b", Kind.SERVER, "backend", "5.6.7.8", false)
+    );
+
+    assertThat(Trace.merge(trace)).usingFieldByFieldElementComparator().containsExactlyInAnyOrder(
+      span("a", null, "a", Kind.SERVER, "frontend", null, false),
+      span("a", "a", "b", Kind.CLIENT, "frontend", "1.2.3.4", false),
+      span("a", "a", "b", Kind.SERVER, "backend", "5.6.7.8", true)
     );
   }
 
@@ -184,6 +203,46 @@ public class TraceTest {
     );
 
     assertThat(Trace.merge(trace)).containsExactlyElementsOf(trace);
+  }
+
+  // some instrumentation don't add shared flag to servers
+  @Test public void cleanupComparator_ordersClientFirst() {
+    List<Span> trace = asList(
+      span("a", "a", "b", Kind.SERVER, "backend", "1.2.3.5", false),
+      span("a", "a", "b", Kind.CLIENT, "frontend", null, false)
+    );
+
+    Collections.sort(trace, Trace.CLEANUP_COMPARATOR);
+    assertThat(trace.get(0).kind()).isEqualTo(Kind.CLIENT);
+  }
+
+  /** Comparators are meant to be transitive. This exploits edge cases to fool our comparator. */
+  @Test public void cleanupComparator_transitiveKindComparison() {
+    List<Span> trace = new ArrayList<>();
+    Endpoint aEndpoint = Endpoint.newBuilder().serviceName("a").build();
+    Endpoint bEndpoint = Endpoint.newBuilder().serviceName("b").build();
+    Span template = Span.newBuilder().traceId("a").id("a").build();
+    // If there is a transitive ordering problem, TimSort will throw an IllegalArgumentException
+    // when there are at least 32 elements.
+    for (int i = 0, length = 7; i < length; i++) {
+      trace.add(template.toBuilder().shared(true).localEndpoint(bEndpoint).build());
+      trace.add(template.toBuilder().kind(Kind.CLIENT).localEndpoint(bEndpoint).build());
+      trace.add(template.toBuilder().localEndpoint(aEndpoint).build());
+      trace.add(template);
+      trace.add(template.toBuilder().kind(Kind.CLIENT).localEndpoint(aEndpoint).build());
+    }
+
+    Collections.sort(trace, Trace.CLEANUP_COMPARATOR);
+
+    assertThat(new LinkedHashSet<>(trace))
+      .extracting(Span::shared, Span::kind, s -> s.localServiceName())
+      .containsExactly(
+        tuple(null, Kind.CLIENT, "a"),
+        tuple(null, Kind.CLIENT, "b"),
+        tuple(null, null, null),
+        tuple(null, null, "a"),
+        tuple(true, null, "b")
+      );
   }
 
   static Span span(String traceId, @Nullable String parentId, String id, @Nullable Kind kind,

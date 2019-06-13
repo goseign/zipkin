@@ -1,5 +1,5 @@
 /*
- * Copyright 2015-2018 The OpenZipkin Authors
+ * Copyright 2015-2019 The OpenZipkin Authors
  *
  * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
@@ -18,7 +18,6 @@ import com.datastax.driver.core.HostDistance;
 import com.datastax.driver.core.PoolingOptions;
 import com.datastax.driver.core.Session;
 import com.google.common.io.Closer;
-import com.google.common.net.HostAndPort;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.concurrent.TimeUnit;
@@ -51,12 +50,16 @@ public class CassandraStorageRule extends ExternalResource {
 
   @Override
   protected void before() throws Throwable {
-    try {
-      LOGGER.info("Starting docker image " + image);
-      container = new CassandraContainer(image).withExposedPorts(CASSANDRA_PORT);
-      container.start();
-    } catch (RuntimeException e) {
-      LOGGER.warn("Couldn't start docker image " + image + ": " + e.getMessage(), e);
+    if (!"true".equals(System.getProperty("docker.skip"))) {
+      try {
+        LOGGER.info("Starting docker image " + image);
+        container = new CassandraContainer(image).withExposedPorts(CASSANDRA_PORT);
+        container.start();
+      } catch (RuntimeException e) {
+        LOGGER.warn("Couldn't start docker image " + image + ": " + e.getMessage(), e);
+      }
+    } else {
+      LOGGER.info("Skipping startup of docker " + image);
     }
 
     try {
@@ -90,7 +93,7 @@ public class CassandraStorageRule extends ExternalResource {
         .keyspace(keyspace);
   }
 
-  private InetSocketAddress contactPoint() {
+  InetSocketAddress contactPoint() {
     if (container != null && container.isRunning()) {
       return new InetSocketAddress(
           container.getContainerIpAddress(), container.getMappedPort(CASSANDRA_PORT));
@@ -130,8 +133,8 @@ public class CassandraStorageRule extends ExternalResource {
               throw new ContainerLaunchException("Container failed to start");
             }
 
-            HostAndPort hap = HostAndPort.fromParts(getContainerIpAddress(), getMappedPort(9042));
-            InetSocketAddress address = new InetSocketAddress(hap.getHostText(), hap.getPort());
+            InetSocketAddress address =
+              new InetSocketAddress(getContainerIpAddress(), getMappedPort(9042));
 
             try (Cluster cluster = getCluster(address);
                 Session session = cluster.newSession()) {
